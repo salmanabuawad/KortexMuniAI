@@ -16,10 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.documents.extraction import extract_text
-from app.documents.ocr import ocr_document
 from app.documents.storage import compute_hash, store_blob
-from app.models.enums import InsuranceType, PolicyStatus, Severity
+from app.models.enums import InsuranceType, PolicyStatus, Severity, VehicleDocumentType
 from app.models.vehicles import (
     InsuranceConflict,
     InsurancePolicy,
@@ -28,24 +26,14 @@ from app.models.vehicles import (
     VehicleDocument,
     VehicleDocumentExtraction,
 )
-from app.vehicles import ocr
+from app.vehicles.extraction import ExtractionResult, extract_document
 from app.vehicles.insurance_rules import PolicyLike, find_conflicts
 from app.vehicles.normalization import normalize_registration
 
 logger = get_logger("muniai.vehicles.service")
 
-
-def _extract_text(storage_path: str, file_type: str) -> str:
-    """Extract text for a vehicle document, falling back to local OCR (he/ar/en)
-    for scanned/photographed papers."""
-    result = extract_text(storage_path, file_type)
-    if result.needs_ocr:
-        ocr_pages = ocr_document(storage_path, file_type)
-        if ocr_pages:
-            return "\n".join(p.text for p in ocr_pages)
-    if result.pages:
-        return "\n".join(p.text for p in result.pages)
-    return ""
+# Only auto-attach a document to a vehicle when the number is reasonably certain.
+VEHICLE_MATCH_MIN_CONFIDENCE = 0.6
 
 
 def _match_or_create_vehicle(db: Session, plate: str | None) -> Vehicle | None:
@@ -71,44 +59,61 @@ def process_vehicle_document(
 
     _, storage_path = store_blob(data)
     file_type = Path(filename).suffix.lstrip(".").lower()
-    text = _extract_text(storage_path, file_type)
-    ex = ocr.extract(text, filename)
 
-    plate_field = ex.fields.get("registration_number")
-    vehicle = _match_or_create_vehicle(db, plate_field.value if plate_field else None)
+    # Field-aware, layout-aware extraction (native PDF -> region OCR -> full OCR).
+    result = extract_document(storage_path, file_type)
+    doc_type = VehicleDocumentType(result.document_type)
+
+    # Only match a vehicle when the registration number is confident enough —
+    # never silently attach a document to an uncertain vehicle (spec §4/§16).
+    veh_field = result.fields.get("vehicle_number")
+    plate = veh_field.value if veh_field and veh_field.confidence >= VEHICLE_MATCH_MIN_CONFIDENCE else None
+    vehicle = _match_or_create_vehicle(db, plate)
 
     doc = VehicleDocument(
         vehicle_id=vehicle.id if vehicle else None,
-        document_type=ex.document_type,
+        document_type=doc_type,
         original_filename=filename,
         storage_path=storage_path,
         content_hash=content_hash,
         page_count=None,
-        ocr_text=text or None,
-        classification_confidence=ex.fields["document_type"].confidence,
+        ocr_text=(result.raw_text or None),
+        extraction_json=result.as_dict(),
+        ocr_engine=result.ocr_engine,
+        processing_version=result.processing_version,
+        classification_confidence=result.document_type_confidence,
         review_status="needs_review",
         uploaded_by=uploaded_by,
     )
     db.add(doc)
     db.flush()
 
-    for name, f in ex.fields.items():
+    for name, f in result.fields.items():
         db.add(VehicleDocumentExtraction(
             document_id=doc.id, field_name=name, ocr_original_value=f.value,
-            confidence=f.confidence, source_page=f.source_page, verified=False,
+            confidence=f.confidence, source_page=f.page, verified=False,
         ))
 
     # Create an insurance policy for insurance documents (unverified; user confirms).
-    if ex.insurance_type and vehicle:
-        _create_policy(db, vehicle, doc, ex)
+    insurance_type = _insurance_type_from(result)
+    if insurance_type and vehicle:
+        _create_policy(db, vehicle, doc, result, insurance_type)
         run_conflict_scan(db, vehicle.id)
 
     db.commit()
-    # NB: no db.refresh() — the session keeps attributes after commit
-    # (expire_on_commit=False), so doc.document_type stays an enum instance.
-    logger.info("Processed vehicle document %s (type=%s, vehicle=%s)",
-                doc.id, ex.document_type.value, vehicle.id if vehicle else None)
+    logger.info("Processed vehicle document %s (type=%s, vehicle_number=%s, engine=%s)",
+                doc.id, doc_type.value, plate, result.ocr_engine)
     return doc
+
+
+def _insurance_type_from(result: ExtractionResult) -> InsuranceType | None:
+    val = result.field_value("insurance_type")
+    if val:
+        try:
+            return InsuranceType(val)
+        except ValueError:
+            return None
+    return None
 
 
 def _to_date(iso: str | None) -> date | None:
@@ -120,15 +125,16 @@ def _to_date(iso: str | None) -> date | None:
         return None
 
 
-def _create_policy(db: Session, vehicle: Vehicle, doc: VehicleDocument, ex) -> InsurancePolicy:
+def _create_policy(db: Session, vehicle: Vehicle, doc: VehicleDocument,
+                   result: ExtractionResult, insurance_type: InsuranceType) -> InsurancePolicy:
     policy = InsurancePolicy(
         vehicle_id=vehicle.id,
         document_id=doc.id,
-        policy_number=(ex.fields.get("policy_number").value if ex.fields.get("policy_number") else None),
-        insurance_type=ex.insurance_type or InsuranceType.OTHER,
-        insurer=(ex.fields.get("insurer").value if ex.fields.get("insurer") else None),
-        start_date=_to_date(ex.fields["start_date"].value) if "start_date" in ex.fields else None,
-        end_date=_to_date(ex.fields["end_date"].value) if "end_date" in ex.fields else None,
+        policy_number=result.field_value("policy_number"),
+        insurance_type=insurance_type,
+        insurer=result.field_value("insurer"),
+        start_date=_to_date(result.field_value("insurance_start")),
+        end_date=_to_date(result.field_value("insurance_end")),
         status=PolicyStatus.NEEDS_REVIEW,
         confidence=0.5,
         verified=False,

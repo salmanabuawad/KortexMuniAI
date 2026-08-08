@@ -18,7 +18,8 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, uploadVehicleDocument } from "../api/client";
-import type { InsuranceConflict, Vehicle } from "../types";
+import type { InsuranceConflict, Vehicle, VehicleUploadResult } from "../types";
+import { VehicleReviewDialog } from "../components/VehicleReviewDialog";
 
 const SEVERITY_COLOR: Record<string, "default" | "warning" | "error" | "info"> = {
   INFO: "info",
@@ -32,6 +33,7 @@ export function VehiclesPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [review, setReview] = useState<VehicleUploadResult | null>(null);
 
   const { data: vehicles = [] } = useQuery({
     queryKey: ["vehicles"],
@@ -43,10 +45,11 @@ export function VehiclesPage() {
   });
 
   const upload = useMutation({
-    mutationFn: (file: File) => uploadVehicleDocument(file),
-    onSuccess: () => {
+    mutationFn: (file: File) => uploadVehicleDocument(file) as Promise<VehicleUploadResult>,
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["vehicles"] });
       qc.invalidateQueries({ queryKey: ["conflicts"] });
+      setReview(result); // open the review screen with detected fields
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -143,6 +146,17 @@ export function VehiclesPage() {
           </TableBody>
         </Table>
       </Paper>
+
+      <VehicleReviewDialog
+        open={review !== null}
+        documentId={review?.document.id ?? null}
+        extraction={review?.extraction ?? null}
+        onClose={() => setReview(null)}
+        onSaved={() => {
+          qc.invalidateQueries({ queryKey: ["vehicles"] });
+          qc.invalidateQueries({ queryKey: ["conflicts"] });
+        }}
+      />
     </Box>
   );
 }

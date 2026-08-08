@@ -76,7 +76,12 @@ class VehicleDocument(UUIDMixin, TimestampMixin, Base):
     mime_type: Mapped[str | None] = mapped_column(String(120))
     page_count: Mapped[int | None] = mapped_column(Integer)
 
-    ocr_text: Mapped[str | None] = mapped_column(Text)  # original OCR text, retained
+    ocr_text: Mapped[str | None] = mapped_column(Text)  # original OCR/native text, retained
+    # Full structured extraction (fields + candidates + debug), retained raw so a
+    # re-run never loses provenance and the debug view can explain decisions.
+    extraction_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    ocr_engine: Mapped[str | None] = mapped_column(String(40))
+    processing_version: Mapped[str | None] = mapped_column(String(20))
     classification_confidence: Mapped[float | None] = mapped_column(Float)
     review_status: Mapped[str] = mapped_column(String(30), default="needs_review")
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))

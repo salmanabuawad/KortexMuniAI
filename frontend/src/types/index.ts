@@ -85,6 +85,39 @@ export interface InsuranceConflict {
   notes: string | null;
 }
 
+export interface ExtractionField {
+  value: string | null;
+  confidence: number;
+  source: string;
+  page: number;
+  label_detected: string | null;
+  reason: string | null;
+}
+
+export interface VehicleCandidate {
+  value: string;
+  score: number;
+  label: string | null;
+  reason: string;
+  selected: boolean;
+}
+
+export interface ExtractionResultDTO {
+  document_type: string;
+  document_type_confidence: number;
+  fields: Record<string, ExtractionField>;
+  vehicle_candidates: VehicleCandidate[];
+  anchors_detected: string[];
+  warnings: string[];
+  ocr_engine: string;
+  processing_version: string;
+}
+
+export interface VehicleUploadResult {
+  document: { id: string; document_type: string; original_filename: string };
+  extraction: ExtractionResultDTO;
+}
+
 export interface Integration {
   id: string;
   name: string;

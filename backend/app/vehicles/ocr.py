@@ -1,4 +1,9 @@
-"""Deterministic field extraction from vehicle-document text.
+"""DEPRECATED — superseded by app.vehicles.extraction (field-aware, layout-aware).
+
+Kept only for its unit tests; the vehicle service no longer uses it. Safe to
+remove once no external code imports it.
+
+Deterministic field extraction from vehicle-document text.
 
 Text comes from PDF/text extraction or an OCR backend. Extraction here is
 deterministic (regex + keyword lists) and every field carries a confidence and is
