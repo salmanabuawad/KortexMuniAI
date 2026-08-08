@@ -53,6 +53,20 @@ class AgentOut(ORMModel):
     enabled: bool
 
 
+# --- documents ---
+class DocumentOut(ORMModel):
+    id: uuid.UUID
+    title: str
+    original_filename: str
+    file_type: str | None = None
+    classification: str
+    language: str | None = None
+    page_count: int | None = None
+    processing_status: str
+    indexing_status: str | None = None
+    created_at: datetime
+
+
 # --- chat ---
 class ConversationCreate(BaseModel):
     title: str | None = None

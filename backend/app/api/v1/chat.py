@@ -31,8 +31,11 @@ from app.core.logging import get_logger
 from app.db.session import get_db
 from app.models.agents import Agent
 from app.models.chat import Conversation, Message
+from app.models.chat import MessageSource
 from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
+from app.rag.retrieval import retrieve
+from app.rag.service import RAG_SYSTEM, build_context_block
 
 logger = get_logger("muniai.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -102,8 +105,13 @@ def delete_conversation(
     return {"status": "deleted"}
 
 
-def _build_history(convo: Conversation, agent: Agent | None) -> list[ChatMessage]:
-    system = (agent.system_instructions if agent and agent.system_instructions else DEFAULT_SYSTEM)
+def _build_history(
+    convo: Conversation, agent: Agent | None, context_block: str = ""
+) -> list[ChatMessage]:
+    base = agent.system_instructions if agent and agent.system_instructions else DEFAULT_SYSTEM
+    # When we have retrieved sources, use the RAG system prompt + context so the
+    # model answers from documents and cites them.
+    system = f"{RAG_SYSTEM}\n\n{context_block}" if context_block else base
     history = [ChatMessage(role="system", content=system)]
     for m in convo.messages:
         if m.role in (MessageRole.USER, MessageRole.ASSISTANT):
@@ -134,7 +142,12 @@ async def stream_chat(
     db.commit()
     db.refresh(convo)
 
-    history = _build_history(convo, agent)
+    # Permission-aware retrieval — restricted content is filtered in SQL before
+    # anything reaches the model.
+    retrieved = await retrieve(db, user, payload.content)
+    context_block, citations = build_context_block(retrieved)
+
+    history = _build_history(convo, agent, context_block)
     provider = get_provider()
     model = (agent.model if agent and agent.model else None)
     temperature = agent.temperature if agent else 0.2
@@ -168,6 +181,17 @@ async def stream_chat(
             model=model or getattr(provider, "chat_model", None),
         )
         db.add(assistant)
+        db.flush()  # assign assistant.id for the source FKs
+        for cit in citations:
+            db.add(MessageSource(
+                message_id=assistant.id,
+                document_id=uuid.UUID(cit.document_id),
+                chunk_id=uuid.UUID(cit.chunk_id),
+                document_title=cit.document_title,
+                page=cit.page,
+                snippet=cit.snippet,
+                rank=cit.rank,
+            ))
         # Auto-title new conversations from the first exchange.
         if convo.title == "New conversation":
             convo.title = payload.content.strip()[:60] or "New conversation"
@@ -179,7 +203,11 @@ async def stream_chat(
             "origin": AnswerOrigin.LOCAL.value,
             "provider": provider.name,
             "model": assistant.model,
-            "sources": [],  # RAG citations arrive in a later session
+            "sources": [
+                {"rank": c.rank, "document_id": c.document_id,
+                 "document_title": c.document_title, "page": c.page}
+                for c in citations
+            ],
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
