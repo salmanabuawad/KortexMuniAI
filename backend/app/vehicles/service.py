@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.documents.extraction import extract_text
+from app.documents.ocr import ocr_document
 from app.documents.storage import compute_hash, store_blob
 from app.models.enums import InsuranceType, PolicyStatus, Severity
 from app.models.vehicles import (
@@ -34,27 +35,16 @@ from app.vehicles.normalization import normalize_registration
 logger = get_logger("muniai.vehicles.service")
 
 
-def _ocr_image(path: str) -> str:
-    """Best-effort local OCR for images. Uses pytesseract if installed (heb+eng)."""
-    try:
-        import pytesseract
-        from PIL import Image
-    except ImportError:  # pragma: no cover - optional dependency
-        logger.warning("pytesseract/Pillow not installed; image OCR unavailable.")
-        return ""
-    try:
-        return pytesseract.image_to_string(Image.open(path), lang="heb+eng")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Image OCR failed: %s", exc)
-        return ""
-
-
 def _extract_text(storage_path: str, file_type: str) -> str:
+    """Extract text for a vehicle document, falling back to local OCR (he/ar/en)
+    for scanned/photographed papers."""
     result = extract_text(storage_path, file_type)
+    if result.needs_ocr:
+        ocr_pages = ocr_document(storage_path, file_type)
+        if ocr_pages:
+            return "\n".join(p.text for p in ocr_pages)
     if result.pages:
         return "\n".join(p.text for p in result.pages)
-    if result.needs_ocr:
-        return _ocr_image(storage_path)
     return ""
 
 

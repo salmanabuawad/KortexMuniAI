@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.documents.chunking import PageText, chunk_page_text
 from app.documents.extraction import extract_text
+from app.documents.ocr import ocr_document
 from app.documents.storage import compute_hash, store_blob
 from app.models.documents import Document, DocumentChunk, Embedding
 from app.models.enums import Classification, ProcessingStatus
@@ -64,19 +65,30 @@ async def ingest_document(
 
     try:
         result = extract_text(storage_path, file_type)
-        doc.page_count = len(result.pages)
-        doc.ocr_status = "needs_ocr" if result.needs_ocr else "not_required"
 
-        if result.needs_ocr and not result.pages:
-            # OCR pipeline (Paddle/Tesseract) is wired in the document-OCR module;
-            # until then, mark the document as needing OCR rather than faking text.
+        if result.needs_ocr:
+            # Scanned/photographed document — run local OCR (Tesseract he/ar/en).
+            ocr_pages = ocr_document(storage_path, file_type)
+            if ocr_pages:
+                pages = [PageText(page=p.page, text=p.text) for p in ocr_pages]
+                doc.ocr_status = "ocr_done"
+                doc.language = "ocr"
+            else:
+                pages = [PageText(page=p.page, text=p.text) for p in result.pages]
+                doc.ocr_status = "ocr_unavailable"
+        else:
+            pages = [PageText(page=p.page, text=p.text) for p in result.pages]
+            doc.ocr_status = "not_required"
+
+        doc.page_count = len(pages)
+
+        if not any(p.text.strip() for p in pages):
             doc.processing_status = ProcessingStatus.READY
-            doc.indexing_status = "skipped_needs_ocr"
+            doc.indexing_status = "skipped_no_text"
             db.commit()
-            logger.info("Document %s stored; awaiting OCR.", doc.id)
+            logger.info("Document %s stored; no extractable text.", doc.id)
             return doc
 
-        pages = [PageText(page=p.page, text=p.text) for p in result.pages]
         chunks = chunk_page_text(pages)
         _persist_chunks(db, doc, chunks)
         await _embed_chunks(db, doc)

@@ -23,7 +23,7 @@ a defined interface with no working feature yet (surfaced in the UI as *Coming L
 | **Vehicle insurance rules engine**| ✅ | deterministic overlap/duplicate/redundancy/expiry + tests |
 | Document upload + pipeline        | ✅ | sync ingest (extract→chunk→embed→index); worker-ready |
 | Text extraction (txt/pdf/docx)    | ✅ | PyMuPDF + python-docx |
-| OCR for scanned/image docs        | 🟡 | Tesseract path coded (guarded); not installed on server yet |
+| OCR for scanned/image docs        | ✅ | Tesseract (ara+heb+eng); images + scanned PDFs per-page; live-verified |
 | Vehicle-document OCR + extraction | ✅ | deterministic extraction + review/verify API + Vehicles UI |
 | RAG retrieval + hybrid ranking    | ✅ | pgvector semantic + keyword, permission-filtered; live-verified |
 | Source citations                  | ✅ | persisted `message_sources`, shown as [n] chips in chat |
