@@ -36,6 +36,7 @@ from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
 from app.rag.retrieval import retrieve
 from app.rag.service import RAG_SYSTEM, build_context_block
+from app.rag.structured_qa import resolve_structured_question
 
 logger = get_logger("muniai.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -150,6 +151,18 @@ async def stream_chat(
     retrieved = await retrieve(db, user, payload.content)
     context_block, citations = build_context_block(retrieved)
 
+    # Exact questions about structured vehicle fields must not be left to a
+    # small LLM to infer from flattened RTL table text. Re-run the deterministic
+    # extractor against the retrieved source document and, when confident,
+    # answer the field directly.
+    structured = resolve_structured_question(db, payload.content, retrieved)
+    if structured is not None:
+        # Keep the citation rank aligned with the single source we actually used.
+        used = structured.source_chunk
+        citations = [c for c in citations if c.chunk_id == used.chunk_id]
+        if citations:
+            citations[0].rank = 1
+
     history = _build_history(convo, agent, context_block)
     provider = get_provider()
     model = (agent.model if agent and agent.model else None)
@@ -164,11 +177,16 @@ async def stream_chat(
     async def event_stream() -> AsyncIterator[bytes]:
         collected: list[str] = []
         try:
-            async for delta in provider.stream(
-                history, model=model, temperature=temperature
-            ):
-                collected.append(delta)
-                yield _sse({"type": "delta", "content": delta})
+            if structured is not None:
+                # Deterministic source-grounded answer: do not call the LLM.
+                collected.append(structured.content)
+                yield _sse({"type": "delta", "content": structured.content})
+            else:
+                async for delta in provider.stream(
+                    history, model=model, temperature=temperature
+                ):
+                    collected.append(delta)
+                    yield _sse({"type": "delta", "content": delta})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Streaming failed: %s", exc)
             yield _sse({"type": "error", "message": "The local AI service is unavailable."})

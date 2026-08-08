@@ -33,3 +33,15 @@ Expected extraction now includes:
 Vehicle extraction regression suite: 12 passed.
 
 Frontend TypeScript compilation (`tsc -b`) also passes. A full Vite build could not be executed in the sandbox because the uploaded `node_modules` contains platform-specific Rollup optional dependencies from another OS.
+
+## 2026-08-08 — Chat/RAG structured-field fix
+
+Observed failure: asking `מה מספר הרכב` over an RTL insurance PDF returned garbled nearby table values such as `1197...2012`, even though the correct plate was extracted elsewhere.
+
+Fix:
+- Added `app/rag/structured_qa.py`.
+- Exact vehicle-document field questions now re-run the deterministic local extractor on the retrieved source file.
+- If confidence is >= 0.70, chat bypasses the LLM and returns the exact extracted field with a source citation.
+- Supports Hebrew, Arabic and English intent phrases for plate, policy number, insurance dates, holder, ID, insurer, premium, manufacturer, production year, engine capacity and chassis.
+- Normal RAG/LLM chat remains unchanged for non-structured questions.
+- Added regression tests ensuring `מה מספר הרכב` resolves to `7046676` and never to engine/year noise.
