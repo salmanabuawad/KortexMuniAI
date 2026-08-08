@@ -21,14 +21,16 @@ a defined interface with no working feature yet (surfaced in the UI as *Coming L
 | System health endpoint            | ✅ | DB + AI provider |
 | Backup / update scripts           | ✅ | `backup.sh`, `update.sh` |
 | **Vehicle insurance rules engine**| ✅ | deterministic overlap/duplicate/redundancy/expiry + tests |
-| Document upload + pipeline        | ⬜ | model ready; Celery pipeline later |
-| OCR (Paddle/Tesseract, he/ar/en)  | ⬜ | deps optional-installed; pipeline later |
-| Vehicle-document OCR + extraction | ⬜ | classifiers/extraction UI later; rules engine already done |
-| RAG retrieval + hybrid ranking    | ⬜ | pgvector + FTS wiring later |
-| Source citations + document viewer| ⬜ | `message_sources` model ready |
-| Global-AI manual escalation       | ⬜ | `external_ai_escalations` model ready; sanitizer + UI later |
-| Admin center                      | ⬜ | placeholder page |
-| Setup wizard                      | ⬜ | bootstrap admin covers first login |
+| Document upload + pipeline        | ✅ | sync ingest (extract→chunk→embed→index); worker-ready |
+| Text extraction (txt/pdf/docx)    | ✅ | PyMuPDF + python-docx |
+| OCR for scanned/image docs        | 🟡 | Tesseract path coded (guarded); not installed on server yet |
+| Vehicle-document OCR + extraction | ✅ | deterministic extraction + review/verify API + Vehicles UI |
+| RAG retrieval + hybrid ranking    | ✅ | pgvector semantic + keyword, permission-filtered; live-verified |
+| Source citations                  | ✅ | persisted `message_sources`, shown as [n] chips in chat |
+| Document viewer                   | ⬜ | download works; in-page PDF viewer later |
+| Global-AI manual escalation       | ✅ | PII sanitizer + prepare/import endpoints + dialog |
+| Admin center                      | ✅ | stats, users, models, integrations, audit |
+| Setup wizard                      | ⬜ | bootstrap admin + seeding covers first login |
 
 ## Phase 2
 Microsoft Entra ID (OIDC) · SharePoint/OneDrive/Outlook · Meetings/transcription ·
