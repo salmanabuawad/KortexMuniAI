@@ -36,7 +36,7 @@ from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
 from app.rag.retrieval import retrieve
 from app.rag.service import RAG_SYSTEM, build_context_block
-from app.rag.structured_qa import resolve_structured_question
+from app.rag.structured_qa import resolve_structured_answer
 
 logger = get_logger("muniai.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -146,39 +146,39 @@ async def stream_chat(
     db.commit()
     db.refresh(convo)
 
-    # Permission-aware retrieval — restricted content is filtered in SQL before
-    # anything reaches the model.
-    retrieved = await retrieve(db, user, payload.content)
-    context_block, citations = build_context_block(retrieved)
+    # STRUCTURED-FIRST: known vehicle-document fields are answered deterministically
+    # from stored extraction — no RAG, no LLM (spec Parts 8/10). The small local
+    # model is never asked to read the value off a flattened RTL table.
+    structured = resolve_structured_answer(db, user, convo, payload.content)
 
-    # Exact questions about structured vehicle fields must not be left to a
-    # small LLM to infer from flattened RTL table text. Re-run the deterministic
-    # extractor against the retrieved source document and, when confident,
-    # answer the field directly.
-    structured = resolve_structured_question(db, payload.content, retrieved)
-    if structured is not None:
-        # Keep the citation rank aligned with the single source we actually used.
-        used = structured.source_chunk
-        citations = [c for c in citations if c.chunk_id == used.chunk_id]
-        if citations:
-            citations[0].rank = 1
-
-    history = _build_history(convo, agent, context_block)
     provider = get_provider()
     model = (agent.model if agent and agent.model else None)
     temperature = agent.temperature if agent else 0.2
 
+    citations = []
+    history: list[ChatMessage] = []
+    if structured is None:
+        # Permission-aware retrieval — restricted content is filtered in SQL before
+        # anything reaches the model.
+        retrieved = await retrieve(db, user, payload.content)
+        context_block, citations = build_context_block(retrieved)
+        history = _build_history(convo, agent, context_block)
+
+    debug = structured.debug if structured else {
+        "question": payload.content, "detected_intent": None,
+        "lookup_mode": "rag", "llm_called": True}
+
     audit.record(
         db, action="ai_query", user_id=user.id, resource_type="conversation",
         resource_id=convo.id, ip_address=client_ip(request),
-        detail=f"provider={provider.name} model={model or 'default'}",
+        detail=(f"structured:{structured.field}" if structured
+                else f"rag provider={provider.name} model={model or 'default'}"),
     )
 
     async def event_stream() -> AsyncIterator[bytes]:
         collected: list[str] = []
         try:
             if structured is not None:
-                # Deterministic source-grounded answer: do not call the LLM.
                 collected.append(structured.content)
                 yield _sse({"type": "delta", "content": structured.content})
             else:
@@ -193,27 +193,40 @@ async def stream_chat(
             return
 
         content = "".join(collected)
+        origin = AnswerOrigin.EXTRACTED if structured else AnswerOrigin.LOCAL
         assistant = Message(
             conversation_id=convo.id,
             role=MessageRole.ASSISTANT,
             content=content,
-            origin=AnswerOrigin.LOCAL,
-            provider=provider.name,
-            model=model or getattr(provider, "chat_model", None),
+            origin=origin,
+            provider=("extraction" if structured else provider.name),
+            model=(None if structured else (model or getattr(provider, "chat_model", None))),
         )
         db.add(assistant)
         db.flush()  # assign assistant.id for the source FKs
-        for cit in citations:
+
+        if structured is not None:
+            # Exactly one source for a deterministic field answer (spec §13).
             db.add(MessageSource(
-                message_id=assistant.id,
-                document_id=uuid.UUID(cit.document_id),
-                chunk_id=uuid.UUID(cit.chunk_id),
-                document_title=cit.document_title,
-                page=cit.page,
-                snippet=cit.snippet,
-                rank=cit.rank,
+                message_id=assistant.id, document_id=None, chunk_id=None,
+                document_title=structured.document_title, page=structured.page,
+                snippet=None, rank=1,
             ))
-        # Auto-title new conversations from the first exchange.
+            sources_out = [{"rank": 1, "document_id": structured.document_id,
+                            "document_title": structured.document_title, "page": structured.page}]
+        else:
+            for cit in citations:
+                db.add(MessageSource(
+                    message_id=assistant.id,
+                    document_id=uuid.UUID(cit.document_id),
+                    chunk_id=uuid.UUID(cit.chunk_id),
+                    document_title=cit.document_title,
+                    page=cit.page, snippet=cit.snippet, rank=cit.rank,
+                ))
+            sources_out = [{"rank": c.rank, "document_id": c.document_id,
+                            "document_title": c.document_title, "page": c.page}
+                           for c in citations]
+
         if convo.title == "New conversation":
             convo.title = payload.content.strip()[:60] or "New conversation"
         db.commit()
@@ -221,14 +234,11 @@ async def stream_chat(
         yield _sse({
             "type": "done",
             "message_id": str(assistant.id),
-            "origin": AnswerOrigin.LOCAL.value,
-            "provider": provider.name,
+            "origin": origin.value,
+            "provider": assistant.provider,
             "model": assistant.model,
-            "sources": [
-                {"rank": c.rank, "document_id": c.document_id,
-                 "document_title": c.document_title, "page": c.page}
-                for c in citations
-            ],
+            "sources": sources_out,
+            "debug": debug,
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

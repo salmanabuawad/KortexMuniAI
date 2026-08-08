@@ -358,9 +358,21 @@ function MessageBubble({ message }: { message: Message }) {
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <Chip
               size="small"
-              color={message.origin === "LOCAL" ? "success" : "warning"}
+              color={
+                message.origin === "EXTRACTED"
+                  ? "info"
+                  : message.origin === "LOCAL"
+                    ? "success"
+                    : "warning"
+              }
               variant="outlined"
-              label={message.origin === "LOCAL" ? t("chat.localBadge") : t("chat.externalBadge")}
+              label={
+                message.origin === "EXTRACTED"
+                  ? t("chat.extractedBadge")
+                  : message.origin === "LOCAL"
+                    ? t("chat.localBadge")
+                    : t("chat.externalBadge")
+              }
             />
             {message.model && <Chip size="small" variant="outlined" label={message.model} />}
           </Stack>

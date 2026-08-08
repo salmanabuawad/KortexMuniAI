@@ -1,72 +1,73 @@
 """Deterministic answers for structured vehicle-document questions.
 
-Small local chat models can hallucinate when an RTL insurance table is flattened
-into RAG chunks.  For exact field questions (plate, policy number, dates, etc.)
-we therefore re-use the deterministic vehicle-document extractor on the source
-PDF instead of asking the LLM to infer a value from token order.
+Design principle (per product owner): for KNOWN structured fields, simple
+deterministic Python beats asking a small local model to reason over flattened
+RTL PDF chunks. The LLM is only used for genuinely open questions.
+
+Flow for a question:
+    detect_structured_intent(question)      # deterministic aliases, no LLM
+        -> field
+    read the field from the document's STORED extraction_json
+        -> value + confidence + page
+    if confidence high enough -> format a direct answer, cite ONE source
+
+This module is intentionally free of DB/LLM imports in its core so it is trivially
+unit-testable; the DB lookup lives in resolve_structured_answer().
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
-import uuid
+from dataclasses import dataclass, field as dc_field
 
-from sqlalchemy.orm import Session
+# --------------------------------------------------------------------------- #
+# Intent detection
+# --------------------------------------------------------------------------- #
 
-from app.core.logging import get_logger
-from app.models.documents import Document
-from app.rag.retrieval import RetrievedChunk
-from app.vehicles.extraction import extract_document
-
-logger = get_logger("muniai.rag.structured_qa")
-
-
-@dataclass(frozen=True)
-class StructuredAnswer:
-    content: str
-    field_name: str
-    value: str
-    source_chunk: RetrievedChunk
-
-
-# Order matters: use specific intents before generic vehicle wording.
-_FIELD_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
+# Full-phrase patterns (unambiguous even inside a longer sentence). conf 0.97.
+_FULL_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("vehicle_number", (
-        r"מספר\s*(?:ה)?רכב", r"מס[׳'\"]?\s*רישוי", r"מספר\s*רישוי",
-        r"plate\s*(?:number|no\.?|#)?", r"registration\s*(?:number|no\.?)",
+        r"מספר\s*(?:ה)?רכב", r"מס[׳'\"]?\s*רישוי", r"מספר\s*רישוי", r"מס[׳'\"]?\s*רכב",
+        r"vehicle\s*(?:number|no\.?|registration)", r"plate\s*(?:number|no\.?|#)?",
+        r"registration\s*(?:number|no\.?)", r"license\s*plate",
         r"رقم\s*(?:السيارة|المركبة|الترخيص)",
     )),
     ("policy_number", (
         r"מספר\s*(?:ה)?פוליסה", r"מס[׳'\"]?\s*פוליסה",
-        r"policy\s*(?:number|no\.?)", r"رقم\s*(?:البوليصة|الوثيقة)",
+        r"policy\s*(?:number|no\.?)", r"رقم\s*(?:البوليصة|الوثيقة|وثيقة)",
     )),
     ("insurance_start", (
-        r"תחילת\s*(?:ה)?ביטוח", r"מועד\s*תחילת\s*(?:ה)?ביטוח",
-        r"insurance\s*start", r"start\s*date", r"بداية\s*التأمين",
+        r"תחילת\s*(?:ה)?ביטוח", r"מועד\s*תחילת\s*(?:ה)?ביטוח", r"תאריך\s*תחילה",
+        r"מתי\s*(?:ה)?ביטוח\s*מתחיל", r"מתי\s*מתחיל",
+        r"insurance\s*start", r"start\s*date", r"when\s*does\s*(?:the\s*)?insurance\s*start",
+        r"بداية\s*التأمين", r"تاريخ\s*البداية", r"متى\s*يبدأ\s*التأمين",
     )),
     ("insurance_end", (
-        r"(?:סיום|תום|פקיעת)\s*(?:ה)?ביטוח", r"מועד\s*פקיעת\s*(?:ה)?ביטוח",
-        r"insurance\s*(?:end|expiry|expiration)", r"end\s*date",
-        r"نهاية\s*التأمين", r"انتهاء\s*التأمين",
+        r"(?:סיום|תום|פקיעת)\s*(?:ה)?ביטוח", r"מועד\s*פקיעת\s*(?:ה)?ביטוח", r"תאריך\s*סיום",
+        r"תוקף\s*(?:ה)?ביטוח", r"עד\s*מתי", r"מתי\s*(?:ה)?ביטוח\s*נגמר", r"מתי\s*נגמר",
+        r"insurance\s*(?:end|expiry|expiration)", r"end\s*date", r"expiry\s*date",
+        r"when\s*does\s*(?:the\s*)?insurance\s*(?:end|expire)",
+        r"نهاية\s*التأمين", r"انتهاء\s*التأمين", r"تاريخ\s*الانتهاء", r"صلاحية\s*التأمين",
+        r"متى\s*ينتهي\s*التأمين",
     )),
     ("policy_holder", (
-        r"בעל\s*(?:ה)?פוליסה", r"שם\s*(?:ה)?מבוטח",
+        r"בעל\s*(?:ה)?פוליסה", r"שם\s*(?:ה)?מבוטח", r"מי\s*(?:ה)?מבוטח",
         r"policy\s*holder", r"insured\s*(?:name|party)", r"صاحب\s*(?:البوليصة|الوثيقة)",
     )),
     ("id_number", (
-        r"מספר\s*זהות", r"ת[.\"׳']?ז", r"id\s*(?:number|no\.?)", r"رقم\s*الهوية",
+        r"מספר\s*זהות", r"תעודת\s*זהות", r"ת[.\"׳']?\s*ז", r"ח[.\"׳']?\s*פ",
+        r"id\s*(?:number|no\.?)", r"رقم\s*الهوية",
     )),
     ("insurer", (
-        r"חברת\s*(?:ה)?ביטוח", r"מי\s*(?:ה)?מבטח", r"insurer", r"insurance\s*company",
-        r"شركة\s*التأمين",
+        r"חברת\s*(?:ה)?ביטוח", r"מי\s*(?:ה)?מבטח", r"מי\s*(?:ה)?חברה",
+        r"insurer", r"insurance\s*company", r"شركة\s*التأمين",
     )),
     ("premium", (
-        r"(?:דמי\s*ביטוח|פרמיה|עלות\s*(?:ה)?ביטוח)", r"premium", r"قسط\s*التأمين",
+        r"דמי\s*ביטוח", r"פרמיה", r"עלות\s*(?:ה)?ביטוח", r"כמה\s*(?:עלה|שילמו|עולה)",
+        r"premium", r"how\s*much", r"قسط\s*التأمين",
     )),
     ("manufacturer", (
-        r"(?:יצרן|תוצר)\s*(?:ה)?רכב", r"manufacturer", r"صانع\s*(?:السيارة|المركبة)",
+        r"(?:יצרן|תוצר)\s*(?:ה)?רכב", r"manufacturer", r"make", r"صانع\s*(?:السيارة|المركبة)",
     )),
     ("production_year", (
         r"שנת\s*ייצור", r"production\s*year", r"model\s*year", r"سنة\s*الصنع",
@@ -80,139 +81,239 @@ _FIELD_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     )),
 ]
 
-_LABELS_HE = {
-    "vehicle_number": "מספר הרכב",
-    "policy_number": "מספר הפוליסה",
-    "insurance_start": "תחילת הביטוח",
-    "insurance_end": "תום הביטוח",
-    "policy_holder": "בעל הפוליסה",
-    "id_number": "מספר הזהות",
-    "insurer": "חברת הביטוח",
-    "premium": "דמי הביטוח",
-    "manufacturer": "יצרן הרכב",
-    "production_year": "שנת הייצור",
-    "engine_capacity": "נפח המנוע",
-    "chassis": "מספר השלדה",
+# Short aliases for terse follow-ups ("תחילה", "תום", "רכב"...). Applied ONLY to
+# short queries so they never fire inside a long unstructured sentence. conf 0.9.
+_SHORT_ALIASES: dict[str, str] = {
+    # insurance_start
+    "תחילה": "insurance_start", "התחלה": "insurance_start", "מתאריך": "insurance_start",
+    "بداية": "insurance_start", "start": "insurance_start",
+    # insurance_end
+    "תום": "insurance_end", "סיום": "insurance_end", "פקיעה": "insurance_end",
+    "תוקף": "insurance_end", "نهاية": "insurance_end", "انتهاء": "insurance_end",
+    "expiry": "insurance_end", "expiration": "insurance_end",
+    # vehicle_number
+    "רכב": "vehicle_number", "רישוי": "vehicle_number", "مركبة": "vehicle_number",
+    "سيارة": "vehicle_number", "plate": "vehicle_number",
+    # policy_number
+    "פוליסה": "policy_number", "بوليصة": "policy_number", "policy": "policy_number",
+    # policy_holder
+    "מבוטח": "policy_holder", "مؤمن": "policy_holder",
+    # id_number
+    "זהות": "id_number", "תז": "id_number", "هوية": "id_number",
+    # premium
+    "מחיר": "premium", "עלות": "premium", "פרמיה": "premium", "سعر": "premium",
+    "قسط": "premium", "price": "premium", "cost": "premium",
+    # insurer
+    "מבטח": "insurer", "insurer": "insurer",
 }
 
-_LABELS_AR = {
-    "vehicle_number": "رقم المركبة",
-    "policy_number": "رقم الوثيقة",
-    "insurance_start": "بداية التأمين",
-    "insurance_end": "نهاية التأمين",
-    "policy_holder": "صاحب الوثيقة",
-    "id_number": "رقم الهوية",
-    "insurer": "شركة التأمين",
-    "premium": "قسط التأمين",
-    "manufacturer": "صانع المركبة",
-    "production_year": "سنة الصنع",
-    "engine_capacity": "سعة المحرك",
-    "chassis": "رقم الشاسيه",
-}
-
-_LABELS_EN = {
-    "vehicle_number": "Vehicle number",
-    "policy_number": "Policy number",
-    "insurance_start": "Insurance start",
-    "insurance_end": "Insurance end",
-    "policy_holder": "Policy holder",
-    "id_number": "ID number",
-    "insurer": "Insurer",
-    "premium": "Insurance premium",
-    "manufacturer": "Manufacturer",
-    "production_year": "Production year",
-    "engine_capacity": "Engine capacity",
-    "chassis": "Chassis number",
-}
+_SHORT_MAX_TOKENS = 3
+_PUNCT = re.compile(r"[?.!,:;،؟\"'’“”׳״\-]+")
 
 
-def detect_field_intent(query: str) -> str | None:
-    q = (query or "").strip().lower()
-    if not q:
+@dataclass
+class Intent:
+    field: str | None
+    confidence: float
+
+    def __bool__(self) -> bool:  # truthy when a field was detected
+        return self.field is not None
+
+
+def _normalize(q: str) -> str:
+    q = _PUNCT.sub(" ", q or "")
+    return re.sub(r"\s+", " ", q).strip()
+
+
+def _strip_he_prefix(tok: str) -> str:
+    # Drop a leading definite article/prepositions so "הרכב"/"בפוליסה" still match.
+    return re.sub(r"^(ה|ל|ב|מ|ש|כ|ו)", "", tok) if len(tok) > 3 else tok
+
+
+def detect_structured_intent(question: str) -> Intent:
+    """Deterministically map a question to a structured field. No LLM."""
+    norm = _normalize(question)
+    if not norm:
+        return Intent(None, 0.0)
+
+    low = norm.lower()
+    for field, patterns in _FULL_PATTERNS:
+        if any(re.search(p, low, flags=re.IGNORECASE) for p in patterns):
+            return Intent(field, 0.97)
+
+    tokens = norm.split()
+    if len(tokens) <= _SHORT_MAX_TOKENS:
+        for tok in tokens:
+            for cand in (tok, tok.lower(), _strip_he_prefix(tok)):
+                if cand in _SHORT_ALIASES:
+                    return Intent(_SHORT_ALIASES[cand], 0.9)
+    return Intent(None, 0.0)
+
+
+# --------------------------------------------------------------------------- #
+# Reading a field from a stored extraction (extraction_json) or a live result
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class FieldValue:
+    value: str
+    confidence: float
+    page: int
+    label: str | None = None
+    source: str | None = None
+
+
+def field_from_extraction_json(extraction_json: dict, field: str) -> FieldValue | None:
+    """Read a field from a stored ExtractionResult.as_dict() payload."""
+    if not extraction_json:
         return None
-    for field, patterns in _FIELD_PATTERNS:
-        if any(re.search(p, q, flags=re.IGNORECASE) for p in patterns):
-            return field
-    return None
+    f = (extraction_json.get("fields") or {}).get(field)
+    if not f or f.get("value") in (None, ""):
+        return None
+    return FieldValue(
+        value=str(f["value"]).strip(),
+        confidence=float(f.get("confidence") or 0.0),
+        page=int(f.get("page") or 1),
+        label=f.get("label_detected"),
+        source=f.get("source"),
+    )
 
 
-def _language(query: str) -> str:
-    if re.search(r"[\u0600-\u06ff]", query or ""):
+# --------------------------------------------------------------------------- #
+# Answer formatting
+# --------------------------------------------------------------------------- #
+
+_LABELS = {
+    "he": {
+        "vehicle_number": "מספר הרכב הוא", "policy_number": "מספר הפוליסה הוא",
+        "insurance_start": "תחילת הביטוח היא", "insurance_end": "תום הביטוח הוא",
+        "policy_holder": "בעל הפוליסה הוא", "id_number": "מספר הזהות הוא",
+        "insurer": "חברת הביטוח היא", "premium": "דמי הביטוח הם",
+        "manufacturer": "יצרן הרכב הוא", "production_year": "שנת הייצור היא",
+        "engine_capacity": "נפח המנוע הוא", "chassis": "מספר השלדה הוא",
+    },
+    "ar": {
+        "vehicle_number": "رقم المركبة هو", "policy_number": "رقم الوثيقة هو",
+        "insurance_start": "بداية التأمين هي", "insurance_end": "نهاية التأمين هي",
+        "policy_holder": "صاحب الوثيقة هو", "id_number": "رقم الهوية هو",
+        "insurer": "شركة التأمين هي", "premium": "قسط التأمين هو",
+        "manufacturer": "صانع المركبة هو", "production_year": "سنة الصنع هي",
+        "engine_capacity": "سعة المحرك هي", "chassis": "رقم الشاسيه هو",
+    },
+    "en": {
+        "vehicle_number": "Vehicle number:", "policy_number": "Policy number:",
+        "insurance_start": "Insurance start:", "insurance_end": "Insurance end:",
+        "policy_holder": "Policy holder:", "id_number": "ID number:",
+        "insurer": "Insurer:", "premium": "Premium:",
+        "manufacturer": "Manufacturer:", "production_year": "Production year:",
+        "engine_capacity": "Engine capacity:", "chassis": "Chassis number:",
+    },
+}
+
+
+def detect_language(text: str) -> str:
+    if re.search(r"[؀-ۿ]", text or ""):
         return "ar"
-    if re.search(r"[\u0590-\u05ff]", query or ""):
+    if re.search(r"[֐-׿]", text or ""):
         return "he"
     return "en"
 
 
-def _format_value(field: str, value: str, lang: str) -> str:
-    if field in {"insurance_start", "insurance_end"} and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+def _display_value(field: str, value: str) -> str:
+    if field in {"insurance_start", "insurance_end"} and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         y, m, d = value.split("-")
-        value = f"{d}/{m}/{y}"
-    if field == "premium" and value:
-        value = f"{value} ₪" if "₪" not in value else value
-    labels = _LABELS_HE if lang == "he" else _LABELS_AR if lang == "ar" else _LABELS_EN
-    label = labels.get(field, field)
-    if lang == "he":
-        return f"{label} הוא **{value}**. [1]"
-    if lang == "ar":
-        return f"{label} هو **{value}**. [1]"
-    return f"{label}: **{value}**. [1]"
+        return f"{d}/{m}/{y}"
+    if field == "premium":
+        num = value.replace("₪", "").strip()
+        return f"{num} ₪"
+    return value
 
 
-def resolve_structured_question(
-    db: Session,
-    query: str,
-    chunks: list[RetrievedChunk],
-    *,
-    min_confidence: float = 0.70,
-) -> StructuredAnswer | None:
-    """Resolve an exact vehicle-document field question from the source file.
+def format_field_answer(field: str, value: str, lang: str) -> str:
+    label = _LABELS.get(lang, _LABELS["en"]).get(field, field)
+    return f"{label} **{_display_value(field, value)}** [1]"
 
-    Only runs for explicit field intents. It never guesses from flattened RAG
-    text. Documents are tried in retrieval rank order; the first confident
-    extracted value wins.
-    """
-    field = detect_field_intent(query)
-    if not field or not chunks:
+
+# --------------------------------------------------------------------------- #
+# DB-backed resolution for the chat endpoint (reads STORED extraction_json)
+# --------------------------------------------------------------------------- #
+
+import uuid  # noqa: E402
+
+from sqlalchemy import select  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
+from app.models.vehicles import VehicleDocument  # noqa: E402
+
+# Answer directly at/above this confidence; between MIN and this -> hedge; below
+# MIN -> defer to RAG.
+HIGH_CONFIDENCE = 0.85
+MIN_CONFIDENCE = 0.60
+
+
+@dataclass
+class StructuredAnswer:
+    content: str
+    field: str
+    value: str
+    confidence: float
+    document_id: str | None
+    document_title: str | None
+    page: int
+    llm_called: bool = False
+    debug: dict = dc_field(default_factory=dict)
+
+
+def _target_document(db: Session, user, conversation) -> VehicleDocument | None:
+    """Which vehicle document is the user talking about (Part 7 context)."""
+    active_id = getattr(conversation, "active_document_id", None)
+    if active_id:
+        vd = db.get(VehicleDocument, active_id)
+        if vd and vd.extraction_json:
+            return vd
+    # Most recent vehicle document uploaded by this user, else most recent overall.
+    for stmt in (
+        select(VehicleDocument).where(VehicleDocument.uploaded_by == user.id)
+        .order_by(VehicleDocument.created_at.desc()),
+        select(VehicleDocument).order_by(VehicleDocument.created_at.desc()),
+    ):
+        for vd in db.scalars(stmt.limit(10)):
+            if vd.extraction_json:
+                return vd
+    return None
+
+
+def resolve_structured_answer(db: Session, user, conversation, question: str) -> StructuredAnswer | None:
+    """Deterministic structured answer for the chat endpoint, or None to defer to RAG."""
+    intent = detect_structured_intent(question)
+    debug = {"question": question, "detected_intent": intent.field,
+             "intent_confidence": intent.confidence, "lookup_mode": "rag", "llm_called": True}
+    if not intent.field or intent.confidence < 0.8:
         return None
 
-    seen: set[str] = set()
-    for chunk in chunks:
-        if chunk.document_id in seen:
-            continue
-        seen.add(chunk.document_id)
+    vd = _target_document(db, user, conversation)
+    if not vd:
+        return None
 
-        try:
-            doc = db.get(Document, uuid.UUID(chunk.document_id))
-        except Exception:  # UUID coercion / stale row; let normal RAG handle it
-            doc = None
-        if not doc or not doc.storage_path:
-            continue
+    fv = field_from_extraction_json(vd.extraction_json, intent.field)
+    if not fv or fv.confidence < MIN_CONFIDENCE:
+        return None
 
-        path = Path(doc.storage_path)
-        if not path.exists():
-            logger.warning("Structured QA source file missing: %s", path)
-            continue
+    lang = detect_language(question)
+    body = format_field_answer(intent.field, fv.value, lang)
+    if fv.confidence < HIGH_CONFIDENCE:
+        # Hedge for medium confidence (Part 15).
+        prefix = {"he": "מצאתי במסמך: ", "ar": "وجدت في المستند: ", "en": "Found in the document: "}[lang]
+        body = prefix + body
 
-        try:
-            result = extract_document(str(path), doc.file_type or path.suffix.lstrip("."))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Structured extraction failed for %s: %s", path, exc)
-            continue
+    # Remember the active document for terse follow-ups ("תחילה", "תום").
+    conversation.active_document_id = vd.id
 
-        extracted = result.fields.get(field)
-        if not extracted or not extracted.value or extracted.confidence < min_confidence:
-            continue
-
-        value = str(extracted.value).strip()
-        if not value:
-            continue
-
-        return StructuredAnswer(
-            content=_format_value(field, value, _language(query)),
-            field_name=field,
-            value=value,
-            source_chunk=chunk,
-        )
-
-    return None
+    debug.update({"lookup_mode": "structured", "llm_called": False,
+                  "field_value": fv.value, "field_confidence": fv.confidence,
+                  "active_document": vd.original_filename})
+    return StructuredAnswer(
+        content=body, field=intent.field, value=fv.value, confidence=fv.confidence,
+        document_id=str(vd.id), document_title=vd.original_filename, page=fv.page,
+        llm_called=False, debug=debug,
+    )

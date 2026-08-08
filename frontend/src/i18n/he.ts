@@ -27,6 +27,7 @@ export const he: Translation = {
     send: "שליחה",
     empty: "התחל שיחה. התשובות מגיעות מהבינה המלאכותית המקומית שלך.",
     localBadge: "בינה מקומית",
+    extractedBadge: "נתון שחולץ מהמסמך",
     externalBadge: "בינה חיצונית — יובאה ע״י המשתמש",
     sources: "מקורות",
     thinking: "חושב…",

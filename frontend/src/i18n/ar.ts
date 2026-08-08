@@ -27,6 +27,7 @@ export const ar: Translation = {
     send: "إرسال",
     empty: "ابدأ محادثة. تأتي الإجابات من الذكاء الاصطناعي المحلي لديك.",
     localBadge: "ذكاء محلي",
+    extractedBadge: "مُستخرج من المستند",
     externalBadge: "ذكاء خارجي — مستورد من المستخدم",
     sources: "المصادر",
     thinking: "يفكر…",

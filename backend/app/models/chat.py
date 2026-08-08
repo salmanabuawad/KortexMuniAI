@@ -25,6 +25,9 @@ class Conversation(UUIDMixin, TimestampMixin, Base):
     folder: Mapped[str | None] = mapped_column(String(200))
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # The vehicle document currently in focus, so terse follow-ups ("תחילה",
+    # "תום") resolve against the right document without re-specifying it.
+    active_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     messages: Mapped[list["Message"]] = relationship(
         back_populates="conversation",

@@ -25,6 +25,7 @@ export const en = {
     send: "Send",
     empty: "Start a conversation. Answers come from your local AI.",
     localBadge: "LOCAL AI",
+    extractedBadge: "Extracted from document",
     externalBadge: "EXTERNAL AI — USER IMPORTED",
     sources: "Sources",
     thinking: "Thinking…",
