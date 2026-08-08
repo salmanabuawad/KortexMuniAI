@@ -15,10 +15,13 @@ import {
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import AddIcon from "@mui/icons-material/Add";
+import PublicIcon from "@mui/icons-material/Public";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, streamChat } from "../api/client";
 import type { Conversation, Message } from "../types";
+import { EscalationDialog } from "../components/EscalationDialog";
+import { useAuth } from "../auth/AuthContext";
 
 export function ChatPage() {
   const { t } = useTranslation();
@@ -28,7 +31,10 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [escalationOpen, setEscalationOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const canEscalate = user?.permissions.some((p) => p === "*" || p.startsWith("GLOBAL_AI_ESCALATION"));
 
   const { data: conversations = [] } = useQuery({
     queryKey: ["conversations"],
@@ -186,14 +192,38 @@ export function ChatPage() {
                 }
               }}
             />
+            {canEscalate && (
+              <IconButton
+                title={t("escalation.button")}
+                onClick={() => setEscalationOpen(true)}
+                disabled={!activeId}
+              >
+                <PublicIcon />
+              </IconButton>
+            )}
             <IconButton color="primary" onClick={() => void send()} disabled={streaming}>
               <SendIcon />
             </IconButton>
           </Stack>
         </Box>
       </Box>
+
+      <EscalationDialog
+        open={escalationOpen}
+        onClose={() => setEscalationOpen(false)}
+        conversationId={activeId}
+        question={input || lastUserQuestion(messages)}
+        onImported={async () => {
+          if (activeId) setMessages(await api<Message[]>(`/chat/conversations/${activeId}/messages`));
+        }}
+      />
     </Box>
   );
+}
+
+function lastUserQuestion(messages: Message[]): string {
+  const users = messages.filter((m) => m.role === "user");
+  return users.length ? users[users.length - 1].content : "";
 }
 
 function MessageBubble({ message }: { message: Message }) {

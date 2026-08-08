@@ -40,15 +40,9 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return (await resp.json()) as T;
 }
 
-export async function uploadDocument(
-  file: File,
-  classification = "INTERNAL",
-): Promise<unknown> {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("classification", classification);
+async function postMultipart(path: string, form: FormData): Promise<unknown> {
   const token = getToken();
-  const resp = await fetch(`${BASE}/documents`, {
+  const resp = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form, // no Content-Type: browser sets the multipart boundary
@@ -64,6 +58,19 @@ export async function uploadDocument(
     throw new Error(message);
   }
   return resp.json();
+}
+
+export function uploadDocument(file: File, classification = "INTERNAL"): Promise<unknown> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("classification", classification);
+  return postMultipart("/documents", form);
+}
+
+export function uploadVehicleDocument(file: File): Promise<unknown> {
+  const form = new FormData();
+  form.append("file", file);
+  return postMultipart("/vehicles/documents", form);
 }
 
 /**

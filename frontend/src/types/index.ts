@@ -66,6 +66,58 @@ export interface DocumentMeta {
   created_at: string;
 }
 
+export interface Vehicle {
+  id: string;
+  registration_number: string;
+  normalized_number: string;
+  manufacturer: string | null;
+  model: string | null;
+  is_active: boolean;
+}
+
+export interface InsuranceConflict {
+  id: string;
+  vehicle_id: string | null;
+  conflict_type: string;
+  overlap_days: number | null;
+  severity: string;
+  status: string;
+  notes: string | null;
+}
+
+export interface Integration {
+  id: string;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  status: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  result: string;
+  detail: string | null;
+  created_at: string;
+}
+
+export interface AdminStats {
+  users: number;
+  documents: number;
+  conversations: number;
+  vehicles: number;
+  conflicts: number;
+}
+
+export interface EscalationPrepared {
+  escalation_id: string;
+  prompt: string;
+  detected_types: string[];
+  sensitivity: string;
+}
+
 export interface Branding {
   org_name: string;
   accent_color: string;

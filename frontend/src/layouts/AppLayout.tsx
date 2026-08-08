@@ -40,8 +40,8 @@ const NAV: NavItem[] = [
   { to: "/knowledge", labelKey: "nav.knowledge", icon: <KnowledgeIcon />, later: true },
   { to: "/documents", labelKey: "nav.documents", icon: <DocumentsIcon /> },
   { to: "/agents", labelKey: "nav.agents", icon: <AgentsIcon />, later: true },
-  { to: "/vehicles", labelKey: "nav.vehicles", icon: <VehiclesIcon />, later: true },
-  { to: "/admin", labelKey: "nav.admin", icon: <AdminIcon />, later: true },
+  { to: "/vehicles", labelKey: "nav.vehicles", icon: <VehiclesIcon /> },
+  { to: "/admin", labelKey: "nav.admin", icon: <AdminIcon /> },
 ];
 
 export function AppLayout() {

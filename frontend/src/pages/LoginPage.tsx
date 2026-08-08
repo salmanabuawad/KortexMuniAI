@@ -67,7 +67,7 @@ export function LoginPage() {
               <Stack spacing={2}>
                 <TextField
                   label={t("login.email")}
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="username"
