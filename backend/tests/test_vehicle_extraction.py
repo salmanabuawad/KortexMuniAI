@@ -84,3 +84,26 @@ def test_scoring_prefers_labelled_vehicle_number():
     ranked = score_vehicle_candidates(words, labels)
     assert ranked[0].value == "7046676"
     assert ranked[0].selected is True
+
+
+# --- Real-PDF regression (opt-in) ---------------------------------------------
+# The actual certificate contains resident PII, so it is NOT committed. Drop it at
+# tests/fixtures/mandatory_insurance_sample.pdf to run this test locally.
+import os.path  # noqa: E402
+
+_REAL_PDF = os.path.join(os.path.dirname(__file__), "fixtures", "mandatory_insurance_sample.pdf")
+
+
+@pytest.mark.skipif(not os.path.exists(_REAL_PDF), reason="real sample PDF not present (PII, not committed)")
+def test_real_pdf_vehicle_number():
+    pytest.importorskip("pymupdf")
+    from app.vehicles.extraction import extract_document
+
+    r = extract_document(_REAL_PDF, "pdf")
+    # Headline acceptance criterion.
+    assert r.field_value("vehicle_number") == "7046676"
+    assert r.fields["vehicle_number"].confidence >= 0.8  # auto-populates
+    assert r.document_type == "COMPULSORY_INSURANCE"
+    # The ID must NEVER be chosen as the vehicle number.
+    assert r.field_value("vehicle_number") != "37005618"
+    assert not any(c.value == "37005618" and c.selected for c in r.vehicle_candidates)

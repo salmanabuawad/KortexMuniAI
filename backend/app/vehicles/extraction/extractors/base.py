@@ -70,6 +70,18 @@ def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
         if not value_tokens:
             value_tokens = [w for w in label_row
                             if w.x0 >= label.x1 - 1 and w.text.strip()]
+
+    # Otherwise the value is on the row directly below the label (column-aligned).
+    if not value_tokens:
+        below_rows = [r for r in rows if r and min(w.cy for w in r) > label.y1 - label.h * 0.3]
+        below_rows.sort(key=lambda r: min(w.cy for w in r))
+        for r in below_rows:
+            col = [w for w in r if w.text.strip()
+                   and w.x1 >= label.x0 - label.h and w.x0 <= label.x1 + label.h]
+            if col:
+                value_tokens = col
+                break
+
     if not value_tokens:
         w, score, _ = resolve_value(label, words)
         if not w:
@@ -78,12 +90,15 @@ def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
 
     value_tokens.sort(key=lambda w: w.x0)
     text = " ".join(w.text for w in value_tokens).strip(" :־-")
-    if not text:
+    # Reject punctuation-only / too-short fragments (common in messy RTL PDFs).
+    if len(text) < 2 or not any(ch.isalpha() for ch in text):
         return None
-    conf = min(w.conf for w in value_tokens) if value_tokens else 0.6
-    return Field(value=text, confidence=0.85 * conf,
+    tok_conf = min(w.conf for w in value_tokens) if value_tokens else 0.6
+    # Text fields on fragmented RTL layouts are inherently uncertain — keep the
+    # confidence modest so the review UI always flags them for confirmation.
+    return Field(value=text, confidence=0.6 * tok_conf,
                  source="pdf_text_layout" if value_tokens[0].source == "pdf_text" else value_tokens[0].source,
-                 page=label.page, label_detected=label.text, reason="text beside label")
+                 page=label.page, label_detected=label.text, reason="text near label")
 
 
 def _is_label_token(w: Word, label: LabelHit) -> bool:
@@ -108,9 +123,14 @@ def add_vehicle_number(result: ExtractionResult, words: list[Word], labels: list
     result.vehicle_candidates = candidates
     chosen = next((c for c in candidates if c.selected), None)
     if chosen:
+        conf = confidence_from_score(chosen.score)
+        # A 7-8 digit value sitting under a מס' רישוי label is a strong signal —
+        # give it auto-populate confidence so the UI fills it without asking.
+        if chosen.score >= 150:
+            conf = max(conf, 0.9)
         result.fields["vehicle_number"] = Field(
             value=chosen.value,
-            confidence=confidence_from_score(chosen.score),
+            confidence=conf,
             source="pdf_text_layout",
             page=chosen.page,
             label_detected=chosen.label,

@@ -114,8 +114,11 @@ def _build_history(
     system = f"{RAG_SYSTEM}\n\n{context_block}" if context_block else base
     history = [ChatMessage(role="system", content=system)]
     for m in convo.messages:
-        if m.role in (MessageRole.USER, MessageRole.ASSISTANT):
-            history.append(ChatMessage(role=m.role.value, content=m.content))
+        # Enum columns reload from the DB as plain strings, so coerce defensively
+        # (m.role may be a MessageRole enum or a str depending on load path).
+        role = getattr(m.role, "value", m.role)
+        if role in (MessageRole.USER.value, MessageRole.ASSISTANT.value):
+            history.append(ChatMessage(role=role, content=m.content))
     return history
 
 

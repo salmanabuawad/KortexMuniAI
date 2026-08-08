@@ -38,6 +38,10 @@ backups/*
 !logs/.gitkeep
 !backups/.gitkeep
 
+# Real sample documents contain resident PII — never commit them.
+backend/tests/fixtures/*.pdf
+backend/sss_dump.json
+
 # OS / editor
 .DS_Store
 Thumbs.db
