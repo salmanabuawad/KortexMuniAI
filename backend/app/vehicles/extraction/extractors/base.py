@@ -15,8 +15,35 @@ from app.vehicles.extraction.layout import LabelHit, group_rows, resolve_value
 from app.vehicles.extraction.normalizer import digits_only
 from app.vehicles.extraction.schemas import ExtractionResult, Field, Word
 
-INSURERS = ["הראל", "כלל", "מגדל", "הפניקס", "מנורה", "איילון", "שלמה",
-            "ביטוח ישיר", "הכשרה", "AIG"]
+# Strong textual signatures only.  Names such as "כלל" are ordinary Hebrew
+# words and must not be detected by a bare substring search.
+INSURER_SIGNATURES: list[tuple[str, tuple[str, ...]]] = [
+    ("הפול", ("המאגר הישראלי לביטוחי רכב", "המאגר הישראלי לבטוחי רכב", "pool.org.il")),
+    ("הראל", ("הראל חברה לביטוח", "הראל ביטוח")),
+    ("כלל", ("כלל חברה לביטוח", "כלל ביטוח")),
+    ("מגדל", ("מגדל חברה לביטוח", "מגדל ביטוח")),
+    ("הפניקס", ("הפניקס חברה לביטוח", "הפניקס ביטוח")),
+    ("מנורה מבטחים", ("מנורה מבטחים ביטוח", "מנורה מבטחים")),
+    ("איילון", ("איילון חברה לביטוח", "איילון ביטוח")),
+    ("שלמה ביטוח", ("שלמה חברה לביטוח", "שלמה ביטוח")),
+    ("ביטוח ישיר", ("ביטוח ישיר", "איי.די.איי חברה לביטוח")),
+    ("הכשרה", ("הכשרה חברה לביטוח", "הכשרה ביטוח")),
+    ("AIG", ("AIG", "איי.איי.ג'י")),
+    ("שומרה", ("שומרה חברה לביטוח", "שומרה ביטוח")),
+    ("ליברה", ("ליברה חברה לביטוח", "ליברה ביטוח")),
+    ("weSure", ("weSure", "ווישור")),
+]
+
+
+def _relation_confidence(score: float, label_score: float, token_conf: float = 1.0) -> float:
+    """Convert a 0..100 geometric relation into user-facing confidence.
+
+    ``confidence_from_score`` is for vehicle candidate totals (~0..180), not for
+    a single label/value relation.  Using it here capped perfect table matches at
+    ~55%, causing reliable fields to look uncertain in the UI.
+    """
+    geom = max(0.0, min(1.0, score / 100.0))
+    return max(0.0, min(0.99, (0.05 + 0.93 * geom) * label_score * max(token_conf, 0.5)))
 
 
 def _row_of(word: Word, rows: list[list[Word]]) -> list[Word]:
@@ -32,7 +59,7 @@ def resolve_numeric_field(label: LabelHit, words: list[Word]) -> Field | None:
         return None
     return Field(
         value=digits_only(w.text) or w.text.strip(),
-        confidence=confidence_from_score(score) * max(w.conf, 0.5),
+        confidence=_relation_confidence(score, label.score, w.conf),
         source="pdf_text_layout" if w.source == "pdf_text" else w.source,
         page=w.page, label_detected=label.text,
         reason=f"{rel} label {label.text!r}",
@@ -47,7 +74,7 @@ def resolve_raw_field(label: LabelHit, words: list[Word]) -> Field | None:
         return None
     return Field(
         value=w.text.strip(" :־-"),
-        confidence=confidence_from_score(score) * max(w.conf, 0.5),
+        confidence=_relation_confidence(score, label.score, w.conf),
         source="pdf_text_layout" if w.source == "pdf_text" else w.source,
         page=w.page, label_detected=label.text, reason=f"{rel} label {label.text!r}",
     )
@@ -55,6 +82,8 @@ def resolve_raw_field(label: LabelHit, words: list[Word]) -> Field | None:
 
 def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
     """Resolve a multi-token text value (e.g. a name) beside/below a label."""
+    # Never let similarly positioned text from another PDF page leak into a field.
+    words = [w for w in words if w.page == label.page]
     rows = group_rows(words)
     label_row = None
     for row in rows:
@@ -105,7 +134,7 @@ def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
     tok_conf = min(w.conf for w in value_tokens) if value_tokens else 0.6
     # Text fields on fragmented RTL layouts are inherently uncertain — keep the
     # confidence modest so the review UI always flags them for confirmation.
-    return Field(value=text, confidence=0.6 * tok_conf,
+    return Field(value=text, confidence=min(0.92, 0.85 * label.score * tok_conf),
                  source="pdf_text_layout" if value_tokens[0].source == "pdf_text" else value_tokens[0].source,
                  page=label.page, label_detected=label.text, reason="text near label")
 
@@ -122,7 +151,7 @@ def resolve_date_field(label: LabelHit, words: list[Word]) -> Field | None:
         d = dateparser.parse(w.text, dayfirst=True).date()
     except (ValueError, OverflowError, TypeError):
         return None
-    return Field(value=d.isoformat(), confidence=confidence_from_score(score) * max(w.conf, 0.5),
+    return Field(value=d.isoformat(), confidence=_relation_confidence(score, label.score, w.conf),
                  source="layout", page=w.page, label_detected=label.text,
                  reason=f"{rel} label {label.text!r}")
 
@@ -154,6 +183,11 @@ def add_simple_fields(result: ExtractionResult, words: list[Word], labels: list[
     by_field: dict[str, list[LabelHit]] = {}
     for h in labels:
         by_field.setdefault(h.field, []).append(h)
+    # Prefer exact/specific labels over short generic occurrences inside policy
+    # prose. Example: "שם בעל הפוליסה" in the certificate table must beat a
+    # random "בעל הפוליסה" sentence elsewhere on the page.
+    for hits in by_field.values():
+        hits.sort(key=lambda h: (h.score, len(h.text)), reverse=True)
 
     for fld in numeric:
         for lab in by_field.get(fld, []):
@@ -182,10 +216,13 @@ def add_simple_fields(result: ExtractionResult, words: list[Word], labels: list[
 
 
 def detect_insurer(text: str) -> Field | None:
-    for name in INSURERS:
-        if name in text:
-            return Field(value=name, confidence=0.7, source="regex", reason="insurer name match")
+    hay = text or ""
+    for name, signatures in INSURER_SIGNATURES:
+        if any(sig.lower() in hay.lower() for sig in signatures):
+            return Field(value=name, confidence=0.95, source="signature",
+                         reason=f"strong insurer signature: {name}")
     return None
+
 
 
 import re  # noqa: E402

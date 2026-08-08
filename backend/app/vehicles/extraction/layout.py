@@ -38,13 +38,17 @@ class LabelHit:
 
 
 def group_rows(words: list[Word], tol_ratio: float = 0.6) -> list[list[Word]]:
-    """Group words into visual rows by vertical overlap. Each row sorted by x."""
+    """Group words into visual rows by page + vertical overlap.
+
+    Page isolation is critical: grouping only by Y mixed page 1 table values with
+    page 2/3 prose that happened to sit at the same vertical coordinate.
+    """
     rows: list[list[Word]] = []
-    for w in sorted(words, key=lambda w: w.cy):
+    for w in sorted(words, key=lambda w: (w.page, w.cy)):
         placed = False
         for row in rows:
             ref = row[0]
-            if abs(w.cy - ref.cy) <= tol_ratio * ref.h:
+            if w.page == ref.page and abs(w.cy - ref.cy) <= tol_ratio * max(ref.h, w.h):
                 row.append(w)
                 placed = True
                 break

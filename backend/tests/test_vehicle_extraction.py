@@ -104,6 +104,15 @@ def test_real_pdf_vehicle_number():
     assert r.field_value("vehicle_number") == "7046676"
     assert r.fields["vehicle_number"].confidence >= 0.8  # auto-populates
     assert r.document_type == "COMPULSORY_INSURANCE"
+    assert r.field_value("policy_number") == "201-502525667826-00"
+    assert r.field_value("policy_holder") == "אבו עואד נדא"
+    assert r.field_value("id_number") == "37005618"
+    assert r.field_value("engine_capacity") == "1197"
+    assert r.field_value("production_year") == "2012"
+    assert r.field_value("insurance_start") == "2026-08-02"
+    assert r.field_value("insurance_end") == "2026-08-15"
+    assert r.field_value("premium") == "234.00"
+    assert r.field_value("insurer") == "הפול"
     # The ID must NEVER be chosen as the vehicle number.
     assert r.field_value("vehicle_number") != "37005618"
     assert not any(c.value == "37005618" and c.selected for c in r.vehicle_candidates)
