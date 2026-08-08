@@ -135,6 +135,9 @@ def seed_admin(db: Session) -> User | None:
 
 
 def seed_all(db: Session) -> None:
+    from app.integrations.registry import seed_integrations
+
     seed_rbac(db)
     seed_agents(db)
+    seed_integrations(db)
     seed_admin(db)

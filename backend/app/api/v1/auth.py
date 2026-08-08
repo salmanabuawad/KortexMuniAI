@@ -6,13 +6,18 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.schemas import LoginRequest, TokenResponse, UserOut
+from app.api.v1.schemas import (
+    ChangePasswordRequest,
+    LoginRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.audit import service as audit
 from app.auth.deps import client_ip, get_current_user
 from app.core.errors import MuniAIError
 from app.db.session import get_db
 from app.models.iam import User
-from app.security.passwords import verify_password
+from app.security.passwords import hash_password, verify_password
 from app.security.tokens import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -49,3 +54,21 @@ def me(user: User = Depends(get_current_user)) -> UserOut:
     out = UserOut.model_validate(user)
     out.permissions = sorted(user.permission_keys)
     return out
+
+
+@router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not user.hashed_password or not verify_password(payload.current_password, user.hashed_password):
+        raise MuniAIError("Current password is incorrect.", status_code=400, code="bad_password")
+    if len(payload.new_password) < 8:
+        raise MuniAIError("New password must be at least 8 characters.", status_code=400,
+                          code="weak_password")
+    user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    audit.record(db, action="password_changed", user_id=user.id, ip_address=client_ip(request))
+    return {"status": "ok"}
