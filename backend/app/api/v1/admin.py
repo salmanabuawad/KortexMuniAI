@@ -6,7 +6,7 @@ All endpoints require the ADMIN permission.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select
+from sqlalchemy import case as sa_case, func, select
 from sqlalchemy.orm import Session
 
 from app.ai.registry import get_provider
@@ -110,3 +110,75 @@ async def list_models(_: User = Depends(require_permission("ADMIN"))) -> dict:
         "detail": health.detail,
         "models": health.models,
     }
+
+
+def _ai_settings_payload(db: Session) -> dict:
+    from app.core.config import settings
+    from app.core.runtime_config import get_ai_config
+    cfg = get_ai_config(db)
+    return {
+        "openai_enabled": cfg["openai_enabled"],
+        "openai_configured": cfg["openai_configured"],  # enabled AND key present (env)
+        "key_present": bool(settings.openai_api_key.strip()),
+        "escalation_mode": cfg["openai_escalation_mode"],
+        "local_confidence_threshold": cfg["local_confidence_threshold"],
+        "openai_model": cfg["openai_model"],
+        "redaction_enabled": cfg["openai_redaction_enabled"],
+        "blocked_categories": settings.blocked_categories,
+        "max_context_chars": settings.openai_max_context_chars,
+    }
+
+
+@router.get("/ai-settings")
+def ai_settings(_: User = Depends(require_permission("ADMIN")),
+                db: Session = Depends(get_db)) -> dict:
+    """External-AI settings for the admin UI. NEVER returns the API key."""
+    return _ai_settings_payload(db)
+
+
+@router.put("/ai-settings")
+def update_ai_settings(
+    updates: dict,
+    request: Request,
+    admin: User = Depends(require_permission("ADMIN")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update runtime AI toggles in the config table (never the API key)."""
+    from app.core.runtime_config import set_ai_config
+    # The key is env-only — reject any attempt to set it here.
+    updates.pop("openai_api_key", None)
+    set_ai_config(db, updates)
+    audit.record(db, action="ai_settings_changed", user_id=admin.id,
+                 ip_address=client_ip(request), detail=str(sorted(updates)))
+    return _ai_settings_payload(db)
+
+
+@router.post("/ai-settings/test")
+async def ai_test(_: User = Depends(require_permission("ADMIN"))) -> dict:
+    """Test OpenAI connectivity from the backend (never exposes the key)."""
+    from app.ai.providers.openai_provider import openai_service
+    return await openai_service.health_check()
+
+
+@router.get("/ai-usage")
+def ai_usage(_: User = Depends(require_permission("ADMIN")), db: Session = Depends(get_db)) -> dict:
+    """OpenAI usage summary (today / this month) from the external-AI audit."""
+    from datetime import datetime, timezone
+
+    from app.models.audit import ExternalAIAudit
+
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = day_start.replace(day=1)
+
+    def summarize(since) -> dict:
+        rows = db.query(
+            func.count(ExternalAIAudit.id),
+            func.coalesce(func.sum(ExternalAIAudit.input_tokens), 0),
+            func.coalesce(func.sum(ExternalAIAudit.output_tokens), 0),
+            func.coalesce(func.sum(sa_case((ExternalAIAudit.success.is_(True), 1), else_=0)), 0),
+        ).filter(ExternalAIAudit.created_at >= since).one()
+        return {"calls": int(rows[0]), "input_tokens": int(rows[1]),
+                "output_tokens": int(rows[2]), "successful": int(rows[3])}
+
+    return {"today": summarize(day_start), "month": summarize(month_start)}

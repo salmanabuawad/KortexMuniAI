@@ -1,10 +1,14 @@
+import { useState } from "react";
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
   Grid,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Table,
   TableBody,
@@ -14,9 +18,75 @@ import {
   Typography,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AdminStats, AuditEvent, Integration } from "../types";
+
+interface AiSettings {
+  openai_enabled: boolean;
+  openai_configured: boolean;
+  key_present: boolean;
+  escalation_mode: string;
+  openai_model: string;
+  redaction_enabled: boolean;
+}
+interface AiUsage {
+  today: { calls: number; input_tokens: number; output_tokens: number };
+  month: { calls: number; input_tokens: number; output_tokens: number };
+}
+
+function AiSettingsCard() {
+  const qc = useQueryClient();
+  const [test, setTest] = useState<string | null>(null);
+  const { data: s } = useQuery({ queryKey: ["ai-settings"], queryFn: () => api<AiSettings>("/admin/ai-settings") });
+  const { data: usage } = useQuery({ queryKey: ["ai-usage"], queryFn: () => api<AiUsage>("/admin/ai-usage") });
+
+  const setMode = useMutation({
+    mutationFn: (mode: string) =>
+      api("/admin/ai-settings", { method: "PUT", body: JSON.stringify({ openai_escalation_mode: mode }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-settings"] }),
+  });
+  const runTest = useMutation({
+    mutationFn: () => api<{ configured: boolean; reachable: boolean; detail: string }>(
+      "/admin/ai-settings/test", { method: "POST" }),
+    onSuccess: (r) => setTest(r.reachable ? "✓ reachable" : `✗ ${r.detail}`),
+    onError: () => setTest("✗ error"),
+  });
+
+  if (!s) return null;
+  return (
+    <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+      <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 700 }}>External AI (OpenAI)</Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 1.5 }}>
+        <Chip size="small" color={s.key_present ? "success" : "default"}
+          label={s.key_present ? "✓ API key configured" : "✗ No API key"} variant="outlined" />
+        <Chip size="small" color={s.openai_configured ? "success" : "warning"}
+          label={s.openai_configured ? "Enabled" : "Disabled"} variant="outlined" />
+        <Chip size="small" variant="outlined" label={`Model: ${s.openai_model}`} />
+        <Chip size="small" variant="outlined" label={s.redaction_enabled ? "Redaction on" : "Redaction off"} />
+      </Stack>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+        <Typography variant="body2">Escalation:</Typography>
+        <Select size="small" value={s.escalation_mode}
+          onChange={(e) => setMode.mutate(e.target.value)} sx={{ minWidth: 150 }}>
+          <MenuItem value="manual">Manual</MenuItem>
+          <MenuItem value="automatic">Automatic</MenuItem>
+          <MenuItem value="disabled">Disabled</MenuItem>
+        </Select>
+        <Button size="small" variant="outlined" onClick={() => runTest.mutate()} disabled={runTest.isPending}>
+          Test connection
+        </Button>
+        {test && <Typography variant="body2" color={test.startsWith("✓") ? "success.main" : "error.main"}>{test}</Typography>}
+      </Stack>
+      {usage && (
+        <Typography variant="body2" color="text.secondary">
+          Today: {usage.today.calls} calls · {usage.today.input_tokens}/{usage.today.output_tokens} tok ·
+          {" "}This month: {usage.month.calls} calls · {usage.month.input_tokens}/{usage.month.output_tokens} tok
+        </Typography>
+      )}
+    </Paper>
+  );
+}
 
 interface ModelsInfo {
   provider: string;
@@ -62,6 +132,8 @@ export function AdminPage() {
           <Grid item xs={6} md={2.4}><Stat label={t("admin.conflicts")} value={stats.conflicts} /></Grid>
         </Grid>
       )}
+
+      <AiSettingsCard />
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>

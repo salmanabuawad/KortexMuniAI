@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, JSON
+from sqlalchemy import ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,35 @@ class AuditEvent(UUIDMixin, TimestampMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(String(64))
     session_meta: Mapped[dict] = mapped_column(JSON, default=dict)
     detail: Mapped[str | None] = mapped_column(Text)
+
+
+class ExternalAIAudit(UUIDMixin, TimestampMixin, Base):
+    """One record per external-AI (OpenAI) request (spec §19/§20).
+
+    Never stores API keys, full prompts, or document contents — only metadata and
+    usage counts.
+    """
+
+    __tablename__ = "external_ai_audit"
+
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL")
+    )
+    document_id: Mapped[str | None] = mapped_column(String(80))
+    provider: Mapped[str] = mapped_column(String(40), default="openai")
+    model: Mapped[str | None] = mapped_column(String(80))
+    request_type: Mapped[str] = mapped_column(String(40), default="escalation")
+    redaction_applied: Mapped[bool] = mapped_column(default=False)
+    context_character_count: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    success: Mapped[bool] = mapped_column(default=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    department: Mapped[str | None] = mapped_column(String(120))
 
 
 class ExternalAIEscalation(UUIDMixin, TimestampMixin, Base):

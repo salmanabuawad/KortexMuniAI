@@ -22,6 +22,7 @@ from app.api.v1.schemas import (
     ChatRequest,
     ConversationCreate,
     ConversationOut,
+    EscalateRequest,
     MessageOut,
 )
 from app.audit import service as audit
@@ -34,10 +35,23 @@ from app.models.chat import Conversation, Message
 from app.models.chat import MessageSource
 from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
+from app.ai.escalation_service import run_escalation
+from app.core.config import settings
+from app.core.runtime_config import get_ai_config
 from app.rag.postprocess import clean_answer, has_content
 from app.rag.retrieval import retrieve
 from app.rag.service import RAG_SYSTEM, build_context_block
 from app.rag.structured_qa import detect_language, resolve_structured_answer
+
+_FALLBACK = {
+    "he": "לא הצלחתי למצוא תשובה ברורה במסמכים הזמינים. נסו לנסח מחדש או לבחור את המסמך הרלוונטי.",
+    "ar": "لم أتمكن من العثور على إجابة واضحة في المستندات المتاحة. حاول إعادة الصياغة أو اختيار المستند المناسب.",
+    "en": "I could not find a clear answer in the available documents. Try rephrasing or selecting the relevant document.",
+}
+
+
+def _escalation_permitted(user: User) -> bool:
+    return bool({"*", "GLOBAL_AI_ESCALATION:*", "GLOBAL_AI_ESCALATION"} & user.permission_keys)
 
 logger = get_logger("muniai.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -183,91 +197,167 @@ async def stream_chat(
                 else f"rag provider={provider.name} model={model or 'default'}"),
     )
 
+    ai_cfg = get_ai_config(db)
+    openai_available = (ai_cfg["openai_configured"]
+                        and ai_cfg["openai_escalation_mode"] in ("manual", "automatic")
+                        and _escalation_permitted(user))
+
     async def event_stream() -> AsyncIterator[bytes]:
-        collected: list[str] = []
+        origin = AnswerOrigin.EXTRACTED if structured else AnswerOrigin.LOCAL
+        provider_name = "extraction" if structured else provider.name
+        used_model = None if structured else (model or getattr(provider, "chat_model", None))
+        sources_out: list[dict] = []
+        needs_escalation = False
+        local_ok = True
+
         try:
             if structured is not None:
-                collected.append(structured.content)
-                yield _sse({"type": "delta", "content": structured.content})
+                content = structured.content
+                yield _sse({"type": "delta", "content": content})
+                sources_out = [{"rank": 1, "document_id": structured.document_id,
+                                "document_title": structured.document_title, "page": structured.page}]
             else:
-                # Accumulate the full RAG answer, then post-process (dedupe repeats,
-                # strip [n] markers) BEFORE showing it — a small model otherwise
-                # loops and echoes the duplicated context.
                 raw: list[str] = []
-                async for delta in provider.stream(
-                    history, model=model, temperature=temperature
-                ):
+                async for delta in provider.stream(history, model=model, temperature=temperature):
                     raw.append(delta)
-                cleaned = clean_answer("".join(raw))
-                # If the small model produced garbage/scaffolding or nothing usable,
-                # don't show it — say so gracefully in the user's language.
-                if not has_content(cleaned):
-                    lang = detect_language(payload.content)
-                    cleaned = {
-                        "he": "לא הצלחתי למצוא תשובה ברורה במסמכים הזמינים. נסו לנסח מחדש או לבחור את המסמך הרלוונטי.",
-                        "ar": "لم أتمكن من العثور على إجابة واضحة في المستندات المتاحة. حاول إعادة الصياغة أو اختيار المستند المناسب.",
-                        "en": "I could not find a clear answer in the available documents. Try rephrasing or selecting the relevant document.",
-                    }[lang]
-                collected.append(cleaned)
-                yield _sse({"type": "delta", "content": cleaned})
+                model_ans = clean_answer("".join(raw))
+                # Local answer is "good enough" only if it has real content AND was
+                # grounded in retrieved sources.
+                local_ok = has_content(model_ans) and len(citations) > 0
+                content = model_ans if local_ok else _FALLBACK[detect_language(payload.content)]
+
+                # AUTOMATIC mode: escalate a weak local answer to OpenAI now.
+                if not local_ok and openai_available and ai_cfg["openai_escalation_mode"] == "automatic":
+                    esc = await run_escalation(db, user, convo, payload.content, payload.document_id, ai_cfg)
+                    if esc.ok:
+                        origin, provider_name, used_model = AnswerOrigin.OPENAI, "openai", esc.model
+                        content = esc.answer
+                        sources_out = [{"rank": i + 1, "document_id": s.get("document_id"),
+                                        "document_title": s.get("document"), "page": s.get("page")}
+                                       for i, s in enumerate(esc.sources)]
+                        local_ok = True
+
+                if origin is AnswerOrigin.LOCAL:
+                    sources_out = [{"rank": c.rank, "document_id": c.document_id,
+                                    "document_title": c.document_title, "page": c.page}
+                                   for c in citations]
+                # MANUAL mode: flag that OpenAI could help (user decides).
+                needs_escalation = (not local_ok) and openai_available
+                yield _sse({"type": "delta", "content": content})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Streaming failed: %s", exc)
             yield _sse({"type": "error", "message": "The local AI service is unavailable."})
             return
 
-        content = "".join(collected)
-        origin = AnswerOrigin.EXTRACTED if structured else AnswerOrigin.LOCAL
         assistant = Message(
-            conversation_id=convo.id,
-            role=MessageRole.ASSISTANT,
-            content=content,
-            origin=origin,
-            provider=("extraction" if structured else provider.name),
-            model=(None if structured else (model or getattr(provider, "chat_model", None))),
+            conversation_id=convo.id, role=MessageRole.ASSISTANT, content=content,
+            origin=origin, provider=provider_name, model=used_model,
         )
         db.add(assistant)
-        db.flush()  # assign assistant.id for the source FKs
-
-        if structured is not None:
-            # Exactly one source for a deterministic field answer (spec §13).
+        db.flush()
+        for s in sources_out:
+            did = s.get("document_id")
+            try:
+                did_uuid = uuid.UUID(did) if did else None
+            except (ValueError, TypeError):
+                did_uuid = None
             db.add(MessageSource(
-                message_id=assistant.id, document_id=None, chunk_id=None,
-                document_title=structured.document_title, page=structured.page,
-                snippet=None, rank=1,
+                message_id=assistant.id, document_id=did_uuid, chunk_id=None,
+                document_title=s.get("document_title"), page=s.get("page"),
+                snippet=None, rank=s.get("rank", 1),
             ))
-            sources_out = [{"rank": 1, "document_id": structured.document_id,
-                            "document_title": structured.document_title, "page": structured.page}]
-        else:
-            for cit in citations:
-                db.add(MessageSource(
-                    message_id=assistant.id,
-                    document_id=uuid.UUID(cit.document_id),
-                    chunk_id=uuid.UUID(cit.chunk_id),
-                    document_title=cit.document_title,
-                    page=cit.page, snippet=cit.snippet, rank=cit.rank,
-                ))
-            sources_out = [{"rank": c.rank, "document_id": c.document_id,
-                            "document_title": c.document_title, "page": c.page}
-                           for c in citations]
 
         if convo.title == "New conversation":
             convo.title = payload.content.strip()[:60] or "New conversation"
         db.commit()
         db.refresh(assistant)
         debug_out = {**debug, "answer_char_count": len(content),
-                     "sources_used": len(sources_out),
-                     "llm_model": (None if structured else (model or getattr(provider, "chat_model", None)))}
+                     "sources_used": len(sources_out), "llm_model": used_model,
+                     "needs_escalation": needs_escalation}
         yield _sse({
             "type": "done",
             "message_id": str(assistant.id),
             "origin": origin.value,
-            "provider": assistant.provider,
-            "model": assistant.model,
+            "provider": provider_name,
+            "model": used_model,
             "sources": sources_out,
+            "needs_escalation": needs_escalation,
+            "openai_available": openai_available,
             "debug": debug_out,
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/escalate")
+async def escalate(
+    payload: EscalateRequest,
+    request: Request,
+    user: User = Depends(require_permission("GLOBAL_AI_ESCALATION")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manual OpenAI escalation (spec §17). The backend reconstructs the question +
+    minimal redacted context; the browser never sends prompts or the API key."""
+    convo = _get_conversation(db, user, payload.conversation_id)
+    ai_cfg = get_ai_config(db)
+    if not ai_cfg["openai_configured"] or ai_cfg["openai_escalation_mode"] == "disabled":
+        raise MuniAIError("External AI is not available.", status_code=400, code="openai_unavailable")
+
+    # Reconstruct the question server-side from the referenced/last user message.
+    question: str | None = None
+    if payload.message_id:
+        m = db.get(Message, payload.message_id)
+        if m and m.conversation_id == convo.id and getattr(m.role, "value", m.role) == "user":
+            question = m.content
+    if not question:
+        users = [m for m in convo.messages if getattr(m.role, "value", m.role) == "user"]
+        question = users[-1].content if users else None
+    if not question:
+        raise MuniAIError("No question to escalate.", status_code=400, code="no_question")
+
+    doc_id = payload.document_id or convo.active_document_id
+    esc = await run_escalation(db, user, convo, question, doc_id, ai_cfg)
+
+    if not esc.ok:
+        lang = detect_language(question)
+        if esc.reason == "blocked_category":
+            msg = {"he": "לא ניתן לשלוח מידע מסוג זה לשירות חיצוני.",
+                   "ar": "لا يمكن إرسال هذا النوع من المعلومات إلى خدمة خارجية.",
+                   "en": "This type of information cannot be sent to an external service."}[lang]
+        else:
+            msg = {"he": "לא ניתן כרגע להשתמש בשירות ה-AI החיצוני. מוצגת התשובה המקומית.",
+                   "ar": "خدمة الذكاء الخارجي غير متاحة حالياً. تُعرض الإجابة المحلية.",
+                   "en": "The external AI service is unavailable right now. The local answer is shown."}[lang]
+        return {"ok": False, "provider": "openai", "reason": esc.reason,
+                "answer": msg, "sources": esc.sources}
+
+    assistant = Message(
+        conversation_id=convo.id, role=MessageRole.ASSISTANT, content=esc.answer,
+        origin=AnswerOrigin.OPENAI, provider="openai", model=esc.model,
+    )
+    db.add(assistant)
+    db.flush()
+    for i, s in enumerate(esc.sources):
+        did = s.get("document_id")
+        try:
+            did_uuid = uuid.UUID(did) if did else None
+        except (ValueError, TypeError):
+            did_uuid = None
+        db.add(MessageSource(
+            message_id=assistant.id, document_id=did_uuid, chunk_id=None,
+            document_title=s.get("document"), page=s.get("page"), snippet=None, rank=i + 1,
+        ))
+    db.commit()
+    db.refresh(assistant)
+    audit.record(db, action="openai_escalation", user_id=user.id, resource_type="conversation",
+                 resource_id=convo.id, ip_address=client_ip(request), detail=f"model={esc.model}")
+    return {
+        "ok": True, "provider": "openai", "origin": AnswerOrigin.OPENAI.value,
+        "message_id": str(assistant.id), "model": esc.model, "answer": esc.answer,
+        "sources": [{"rank": i + 1, "document_id": s.get("document_id"),
+                     "document_title": s.get("document"), "page": s.get("page")}
+                    for i, s in enumerate(esc.sources)],
+    }
 
 
 def _sse(data: dict) -> bytes:

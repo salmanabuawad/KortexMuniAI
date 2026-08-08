@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Alert,
   Box,
+  Button,
+  Checkbox,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   List,
   ListItemButton,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Typography,
@@ -18,10 +28,10 @@ import AddIcon from "@mui/icons-material/Add";
 import PublicIcon from "@mui/icons-material/Public";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
 import CloseIcon from "@mui/icons-material/Close";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MenuItem, Select } from "@mui/material";
-import { api, streamChat, uploadDocument } from "../api/client";
+import { api, escalateToOpenAI, streamChat, uploadDocument } from "../api/client";
 import type { Agent, Conversation, DocumentMeta, Message } from "../types";
 import ReactMarkdown from "react-markdown";
 import { EscalationDialog } from "../components/EscalationDialog";
@@ -36,6 +46,10 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [escalationOpen, setEscalationOpen] = useState(false);
+  const [escalateFor, setEscalateFor] = useState<string | null>(null); // assistant msg id
+  const [escalating, setEscalating] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [dontAsk, setDontAsk] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -95,6 +109,31 @@ export function ChatPage() {
     return convo.id;
   };
 
+  const requestEscalation = () => {
+    if (localStorage.getItem("muniai.openaiConsent") === "1") void runEscalation();
+    else setConsentOpen(true);
+  };
+
+  const runEscalation = async () => {
+    if (!activeId) return;
+    setEscalating(true);
+    try {
+      await escalateToOpenAI(activeId, docId || null);
+      setMessages(await api<Message[]>(`/chat/conversations/${activeId}/messages`));
+      setEscalateFor(null);
+    } catch {
+      /* keep the local answer on failure */
+    } finally {
+      setEscalating(false);
+    }
+  };
+
+  const confirmConsent = () => {
+    if (dontAsk) localStorage.setItem("muniai.openaiConsent", "1");
+    setConsentOpen(false);
+    void runEscalation();
+  };
+
   const addFiles = (files: FileList | null) => {
     if (files && files.length) setAttachments((a) => [...a, ...Array.from(files)]);
   };
@@ -145,6 +184,7 @@ export function ChatPage() {
 
     let acc = "";
     let failed = false;
+    let done: { needs_escalation?: boolean; openai_available?: boolean; message_id?: string } | null = null;
     try {
       await streamChat(id, content, agentId || null, (event) => {
         if (event.type === "delta") {
@@ -152,6 +192,8 @@ export function ChatPage() {
           setStreamText(acc);
         } else if (event.type === "error") {
           failed = true;
+        } else if (event.type === "done") {
+          done = event as typeof done;
         }
       }, undefined, docId || null);
     } catch {
@@ -160,6 +202,14 @@ export function ChatPage() {
 
     setStreaming(false);
     setStreamText("");
+    // Offer manual OpenAI escalation when the local answer was weak.
+    // (cast: TS can't see the callback mutation, so it narrows `done` to null)
+    const info = done as { needs_escalation?: boolean; openai_available?: boolean; message_id?: string } | null;
+    if (info?.needs_escalation && info?.openai_available) {
+      setEscalateFor(String(info.message_id));
+    } else {
+      setEscalateFor(null);
+    }
     if (failed) {
       setMessages((m) => [
         ...m,
@@ -261,7 +311,23 @@ export function ChatPage() {
           )}
           <Stack spacing={2} sx={{ maxWidth: 820, mx: "auto" }}>
             {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
+              <Box key={m.id}>
+                <MessageBubble message={m} />
+                {escalateFor === m.id && (
+                  <Box sx={{ mt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="secondary"
+                      startIcon={escalating ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
+                      disabled={escalating}
+                      onClick={requestEscalation}
+                    >
+                      {t("chat.askChatgpt")}
+                    </Button>
+                  </Box>
+                )}
+              </Box>
             ))}
             {streaming && (
               <Bubble role="assistant">
@@ -349,6 +415,26 @@ export function ChatPage() {
           if (activeId) setMessages(await api<Message[]>(`/chat/conversations/${activeId}/messages`));
         }}
       />
+
+      {/* First-time consent before any data leaves the server to OpenAI. */}
+      <Dialog open={consentOpen} onClose={() => setConsentOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{t("openaiConsent.title")}</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" icon={false} sx={{ mb: 1 }}>
+            {t("openaiConsent.body")}
+          </Alert>
+          <FormControlLabel
+            control={<Checkbox checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} />}
+            label={t("openaiConsent.dontAsk")}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConsentOpen(false)}>{t("openaiConsent.cancel")}</Button>
+          <Button variant="contained" color="secondary" onClick={confirmConsent}>
+            {t("openaiConsent.continue")}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
@@ -401,7 +487,9 @@ function MessageBubble({ message }: { message: Message }) {
                   ? "info"
                   : message.origin === "LOCAL"
                     ? "success"
-                    : "warning"
+                    : message.origin === "OPENAI"
+                      ? "secondary"
+                      : "warning"
               }
               variant="outlined"
               label={
@@ -409,7 +497,9 @@ function MessageBubble({ message }: { message: Message }) {
                   ? t("chat.extractedBadge")
                   : message.origin === "LOCAL"
                     ? t("chat.localBadge")
-                    : t("chat.externalBadge")
+                    : message.origin === "OPENAI"
+                      ? t("chat.openaiBadge")
+                      : t("chat.externalBadge")
               }
             />
             {message.model && <Chip size="small" variant="outlined" label={message.model} />}

@@ -45,7 +45,7 @@ export interface Message {
   id: string;
   role: "system" | "user" | "assistant";
   content: string;
-  origin: "LOCAL" | "EXTRACTED" | "EXTERNAL_IMPORTED";
+  origin: "LOCAL" | "EXTRACTED" | "OPENAI" | "EXTERNAL_IMPORTED";
   model: string | null;
   provider: string | null;
   confidence: number | null;

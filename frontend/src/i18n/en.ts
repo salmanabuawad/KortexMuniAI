@@ -26,7 +26,9 @@ export const en = {
     empty: "Start a conversation. Answers come from your local AI.",
     localBadge: "LOCAL AI",
     extractedBadge: "Extracted from document",
+    openaiBadge: "ChatGPT",
     externalBadge: "EXTERNAL AI — USER IMPORTED",
+    askChatgpt: "Ask ChatGPT",
     sources: "Sources",
     thinking: "Thinking…",
     unavailable: "The local AI service is unavailable. Check that Ollama is running.",
@@ -120,6 +122,13 @@ export const en = {
     when: "When",
     provider: "Provider",
     comingLater: "Coming Later",
+  },
+  openaiConsent: {
+    title: "Use ChatGPT?",
+    body: "The question and the minimal required context may be sent to the external OpenAI service. Sensitive details are redacted where possible.",
+    continue: "Continue",
+    cancel: "Cancel",
+    dontAsk: "Don't ask again on this device",
   },
   display: {
     title: "Display",

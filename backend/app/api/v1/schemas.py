@@ -109,6 +109,12 @@ class ChatRequest(BaseModel):
     document_id: uuid.UUID | None = None  # scope the answer to one chosen document
 
 
+class EscalateRequest(BaseModel):
+    conversation_id: uuid.UUID
+    message_id: uuid.UUID | None = None   # the user question to escalate
+    document_id: uuid.UUID | None = None
+
+
 # --- vehicles ---
 class VehicleOut(ORMModel):
     id: uuid.UUID

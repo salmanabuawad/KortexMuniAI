@@ -26,6 +26,11 @@ from dataclasses import dataclass, field as dc_field
 
 # Full-phrase patterns (unambiguous even inside a longer sentence). conf 0.97.
 _FULL_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
+    ("document_type", (
+        r"סוג\s*(?:ה)?מסמך", r"איזה\s*(?:סוג\s*)?מסמך", r"מה\s*(?:זה\s*)?(?:ה)?מסמך\b",
+        r"document\s*type", r"type\s*of\s*(?:the\s*)?document", r"what\s*(?:kind|type).*document",
+        r"نوع\s*(?:ال)?مستند", r"ما\s*نوع\s*المستند",
+    )),
     ("vehicle_number", (
         r"מספר\s*(?:ה)?רכב", r"מס[׳'\"]?\s*רישוי", r"מספר\s*רישוי", r"מס[׳'\"]?\s*רכב",
         r"vehicle\s*(?:number|no\.?|registration)", r"plate\s*(?:number|no\.?|#)?",
@@ -211,6 +216,31 @@ _LABELS = {
 }
 
 
+# Human labels for classified document types (spec: say "רישיון רכב", not filename).
+DOC_TYPE_LABELS: dict[str, dict[str, str]] = {
+    "he": {
+        "VEHICLE_REGISTRATION": "רישיון רכב", "COMPULSORY_INSURANCE": "ביטוח חובה",
+        "COMPREHENSIVE_INSURANCE": "ביטוח מקיף", "THIRD_PARTY_INSURANCE": "ביטוח צד ג'",
+        "PROTECTION_APPROVAL": "אישור מיגון", "VEHICLE_TEST": "מבחן רכב (טסט)",
+        "MAINTENANCE_INVOICE": "חשבונית/מסמך טיפול", "WARRANTY": "כתב אחריות",
+    },
+    "ar": {
+        "VEHICLE_REGISTRATION": "رخصة المركبة", "COMPULSORY_INSURANCE": "تأمين إلزامي",
+        "COMPREHENSIVE_INSURANCE": "تأمين شامل", "THIRD_PARTY_INSURANCE": "تأمين طرف ثالث",
+        "PROTECTION_APPROVAL": "شهادة تحصين", "VEHICLE_TEST": "فحص المركبة",
+        "MAINTENANCE_INVOICE": "فاتورة/مستند صيانة", "WARRANTY": "شهادة ضمان",
+    },
+    "en": {
+        "VEHICLE_REGISTRATION": "Vehicle registration", "COMPULSORY_INSURANCE": "Compulsory insurance",
+        "COMPREHENSIVE_INSURANCE": "Comprehensive insurance", "THIRD_PARTY_INSURANCE": "Third-party insurance",
+        "PROTECTION_APPROVAL": "Protection certificate", "VEHICLE_TEST": "Vehicle test",
+        "MAINTENANCE_INVOICE": "Repair/maintenance invoice", "WARRANTY": "Warranty",
+    },
+}
+
+_DOCTYPE_LEAD = {"he": "סוג המסמך הוא", "ar": "نوع المستند هو", "en": "Document type:"}
+
+
 def detect_language(text: str) -> str:
     if re.search(r"[؀-ۿ]", text or ""):
         return "ar"
@@ -301,6 +331,49 @@ def _target_document(db: Session, user, document_id=None) -> VehicleDocument | N
     return None
 
 
+def _document_type_answer(db: Session, user, document_id, lang: str,
+                          debug: dict) -> StructuredAnswer | None:
+    """Answer 'what type of document' from the deterministic classifier (works for
+    vehicle docs via stored extraction, and for RAG-store docs by classifying the
+    file). Maps the type to a human label (e.g. רישיון רכב)."""
+    dtype = None
+    conf = 0.0
+    title = None
+    doc_id = None
+
+    vd = _target_document(db, user, document_id)
+    if vd and vd.extraction_json:
+        dtype = vd.extraction_json.get("document_type")
+        conf = float(vd.extraction_json.get("document_type_confidence") or 0.9)
+        title, doc_id = vd.original_filename, str(vd.id)
+
+    if not dtype or dtype == "UNKNOWN_VEHICLE_DOCUMENT":
+        doc = db.get(Document, document_id) if document_id else db.scalar(
+            select(Document).where(Document.is_deleted.is_(False))
+            .order_by(Document.created_at.desc()))
+        if doc and doc.storage_path:
+            from app.vehicles.extraction import extract_document
+            try:
+                r = extract_document(doc.storage_path, doc.file_type or "")
+                dtype, conf = r.document_type, r.document_type_confidence
+                title, doc_id = doc.original_filename, str(doc.id)
+            except Exception:  # noqa: BLE001
+                pass
+
+    if not dtype or dtype == "UNKNOWN_VEHICLE_DOCUMENT" or conf < MIN_CONFIDENCE:
+        return None
+
+    label = DOC_TYPE_LABELS.get(lang, DOC_TYPE_LABELS["en"]).get(dtype, dtype)
+    lead = _DOCTYPE_LEAD.get(lang, _DOCTYPE_LEAD["en"])
+    debug.update({"lookup_mode": "structured", "llm_called": False,
+                  "field_value": dtype, "field_confidence": conf, "active_document": title})
+    return StructuredAnswer(
+        content=f"{lead} **{label}**", field="document_type", value=label,
+        confidence=conf, document_id=doc_id, document_title=title, page=1,
+        llm_called=False, debug=debug,
+    )
+
+
 def resolve_structured_answer(db: Session, user, conversation, question: str,
                               document_id=None) -> StructuredAnswer | None:
     """Deterministic structured answer for the chat endpoint, or None to defer to RAG."""
@@ -309,6 +382,12 @@ def resolve_structured_answer(db: Session, user, conversation, question: str,
              "intent_confidence": intent.confidence, "lookup_mode": "rag", "llm_called": True}
     if not intent.field or intent.confidence < 0.8:
         return None
+
+    lang = detect_language(question)
+
+    # Document type is resolved from the classifier (works for any store).
+    if intent.field == "document_type":
+        return _document_type_answer(db, user, document_id, lang, debug)
 
     vd = _target_document(db, user, document_id)
     if not vd:

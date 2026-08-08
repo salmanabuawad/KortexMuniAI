@@ -67,6 +67,17 @@ export function uploadDocument(file: File, classification = "INTERNAL"): Promise
   return postMultipart("/documents", form);
 }
 
+export function escalateToOpenAI(conversationId: string, documentId?: string | null): Promise<{
+  ok: boolean; provider: string; answer: string; reason?: string;
+  message_id?: string; model?: string;
+  sources?: { rank: number; document_id: string | null; document_title: string | null; page: number | null }[];
+}> {
+  return api("/chat/escalate", {
+    method: "POST",
+    body: JSON.stringify({ conversation_id: conversationId, document_id: documentId ?? null }),
+  });
+}
+
 export function uploadVehicleDocument(file: File): Promise<unknown> {
   const form = new FormData();
   form.append("file", file);

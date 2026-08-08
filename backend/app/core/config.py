@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     ollama_embed_model: str = "nomic-embed-text"
     ollama_timeout_seconds: int = 120
 
+    # --- OpenAI (OPTIONAL external escalation; local stays default) ---
+    openai_enabled: bool = False
+    openai_api_key: str = ""            # backend-only; never sent to the frontend
+    openai_model: str = "gpt-4o-mini"
+    openai_escalation_mode: str = "manual"   # manual | automatic | disabled
+    openai_timeout_seconds: int = 30
+    local_confidence_threshold: float = 0.65
+    openai_max_context_chars: int = 12000
+    openai_redaction_enabled: bool = True
+    # Never sent externally even if requested (comma-separated).
+    external_ai_blocked_categories: str = "password,token,api_key,credential,secret"
+
     # --- Localization ---
     default_language: str = "he"
     default_timezone: str = "Asia/Jerusalem"
@@ -80,6 +92,14 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def openai_configured(self) -> bool:
+        return self.openai_enabled and bool(self.openai_api_key.strip())
+
+    @property
+    def blocked_categories(self) -> list[str]:
+        return [c.strip().lower() for c in self.external_ai_blocked_categories.split(",") if c.strip()]
 
 
 @lru_cache

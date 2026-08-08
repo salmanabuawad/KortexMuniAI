@@ -28,7 +28,9 @@ export const ar: Translation = {
     empty: "ابدأ محادثة. تأتي الإجابات من الذكاء الاصطناعي المحلي لديك.",
     localBadge: "ذكاء محلي",
     extractedBadge: "مُستخرج من المستند",
+    openaiBadge: "ChatGPT",
     externalBadge: "ذكاء خارجي — مستورد من المستخدم",
+    askChatgpt: "اسأل ChatGPT",
     sources: "المصادر",
     thinking: "يفكر…",
     unavailable: "خدمة الذكاء الاصطناعي المحلي غير متاحة. تأكد من تشغيل Ollama.",
@@ -122,6 +124,13 @@ export const ar: Translation = {
     when: "متى",
     provider: "المزود",
     comingLater: "قريباً",
+  },
+  openaiConsent: {
+    title: "استخدام ChatGPT؟",
+    body: "قد يُرسل السؤال والحد الأدنى من السياق المطلوب إلى خدمة OpenAI الخارجية. تُحجب التفاصيل الحساسة قدر الإمكان.",
+    continue: "متابعة",
+    cancel: "إلغاء",
+    dontAsk: "لا تسألني مرة أخرى على هذا الجهاز",
   },
   display: {
     title: "العرض",

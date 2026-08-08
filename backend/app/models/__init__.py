@@ -2,7 +2,7 @@
 
 from app.db.base import Base  # noqa: F401
 from app.models.agents import Agent, Tool, agent_tools  # noqa: F401
-from app.models.audit import AuditEvent, ExternalAIEscalation  # noqa: F401
+from app.models.audit import AuditEvent, ExternalAIAudit, ExternalAIEscalation  # noqa: F401
 from app.models.chat import Conversation, Message, MessageSource  # noqa: F401
 from app.models.documents import (  # noqa: F401
     Document,

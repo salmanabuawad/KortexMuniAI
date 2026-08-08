@@ -28,7 +28,9 @@ export const he: Translation = {
     empty: "התחל שיחה. התשובות מגיעות מהבינה המלאכותית המקומית שלך.",
     localBadge: "בינה מקומית",
     extractedBadge: "נתון שחולץ מהמסמך",
+    openaiBadge: "ChatGPT",
     externalBadge: "בינה חיצונית — יובאה ע״י המשתמש",
+    askChatgpt: "שאל את ChatGPT",
     sources: "מקורות",
     thinking: "חושב…",
     unavailable: "שירות הבינה המקומית אינו זמין. ודא ש-Ollama פועל.",
@@ -122,6 +124,13 @@ export const he: Translation = {
     when: "מתי",
     provider: "ספק",
     comingLater: "בקרוב",
+  },
+  openaiConsent: {
+    title: "להשתמש ב-ChatGPT?",
+    body: "השאלה והמידע המינימלי הנדרש לצורך המענה עשויים להישלח לשירות OpenAI החיצוני. פרטים רגישים מוסתרים ככל האפשר.",
+    continue: "המשך",
+    cancel: "ביטול",
+    dontAsk: "אל תשאל אותי שוב במכשיר זה",
   },
   display: {
     title: "תצוגה",
