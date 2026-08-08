@@ -1,0 +1,44 @@
+import type { Translation } from "./en";
+
+export const ar: Translation = {
+  app: { name: "MuniAI", tagline: "ذكاء اصطناعي بلدي خاص، محلي أولاً" },
+  nav: {
+    chat: "الدردشة",
+    search: "البحث",
+    knowledge: "المعرفة",
+    documents: "المستندات",
+    agents: "الوكلاء",
+    vehicles: "المركبات",
+    admin: "الإدارة",
+    systemHealth: "حالة النظام",
+    audit: "سجل التدقيق",
+  },
+  login: {
+    title: "تسجيل الدخول إلى MuniAI",
+    email: "البريد الإلكتروني",
+    password: "كلمة المرور",
+    submit: "دخول",
+    error: "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
+    localNotice: "تبقى بياناتك محلية. لا تُرسل أي بيانات بلدية إلى أي ذكاء اصطناعي سحابي.",
+  },
+  chat: {
+    newConversation: "محادثة جديدة",
+    placeholder: "اسأل MuniAI…",
+    send: "إرسال",
+    empty: "ابدأ محادثة. تأتي الإجابات من الذكاء الاصطناعي المحلي لديك.",
+    localBadge: "ذكاء محلي",
+    externalBadge: "ذكاء خارجي — مستورد من المستخدم",
+    sources: "المصادر",
+    thinking: "يفكر…",
+    unavailable: "خدمة الذكاء الاصطناعي المحلي غير متاحة. تأكد من تشغيل Ollama.",
+  },
+  common: {
+    logout: "خروج",
+    language: "اللغة",
+    comingLater: "قريباً",
+    loading: "جارٍ التحميل…",
+  },
+  comingLater: {
+    body: "هذه الوحدة جزء من خارطة طريق MuniAI ولم تُنفَّذ بعد.",
+  },
+};

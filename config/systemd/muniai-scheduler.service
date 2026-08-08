@@ -1,0 +1,23 @@
+[Unit]
+Description=MuniAI scheduler (Celery beat — expiry reminders, sync, backups)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=muniai
+Group=muniai
+WorkingDirectory=/opt/muniai/backend
+EnvironmentFile=/etc/muniai/muniai.env
+# Implemented alongside the jobs module in a later session.
+ExecStart=/opt/muniai/venv/bin/celery -A app.jobs.worker:celery_app beat --loglevel=INFO
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/muniai/data /opt/muniai/logs
+
+[Install]
+WantedBy=multi-user.target

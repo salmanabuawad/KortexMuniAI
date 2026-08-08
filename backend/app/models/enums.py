@@ -1,0 +1,100 @@
+"""Shared enumerations used across the data model."""
+
+from __future__ import annotations
+
+import enum
+
+
+class Classification(str, enum.Enum):
+    PUBLIC = "PUBLIC"
+    INTERNAL = "INTERNAL"
+    CONFIDENTIAL = "CONFIDENTIAL"
+    RESTRICTED = "RESTRICTED"
+
+
+class PermissionAction(str, enum.Enum):
+    VIEW = "VIEW"
+    CREATE = "CREATE"
+    EDIT = "EDIT"
+    DELETE = "DELETE"
+    UPLOAD = "UPLOAD"
+    DOWNLOAD = "DOWNLOAD"
+    AI_QUERY = "AI_QUERY"
+    EXPORT = "EXPORT"
+    ADMIN = "ADMIN"
+    APPROVE = "APPROVE"
+    GLOBAL_AI_ESCALATION = "GLOBAL_AI_ESCALATION"
+
+
+class ProcessingStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    READY = "READY"
+    FAILED = "FAILED"
+
+
+class JobStatus(str, enum.Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class MessageRole(str, enum.Enum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class AnswerOrigin(str, enum.Enum):
+    """Where an assistant answer came from — never fake that we called a cloud AI."""
+
+    LOCAL = "LOCAL"
+    EXTERNAL_IMPORTED = "EXTERNAL_IMPORTED"
+
+
+# --- Vehicle-document intelligence module ------------------------------------
+
+class VehicleDocumentType(str, enum.Enum):
+    VEHICLE_REGISTRATION = "VEHICLE_REGISTRATION"
+    COMPULSORY_INSURANCE = "COMPULSORY_INSURANCE"
+    COMPREHENSIVE_INSURANCE = "COMPREHENSIVE_INSURANCE"
+    THIRD_PARTY_INSURANCE = "THIRD_PARTY_INSURANCE"
+    PROTECTION_APPROVAL = "PROTECTION_APPROVAL"
+    MAINTENANCE_INVOICE = "MAINTENANCE_INVOICE"
+    WARRANTY = "WARRANTY"
+    VEHICLE_TEST = "VEHICLE_TEST"
+    UNKNOWN_VEHICLE_DOCUMENT = "UNKNOWN_VEHICLE_DOCUMENT"
+
+
+class InsuranceType(str, enum.Enum):
+    COMPULSORY = "COMPULSORY"
+    THIRD_PARTY = "THIRD_PARTY"
+    COMPREHENSIVE = "COMPREHENSIVE"
+    OTHER = "OTHER"
+
+
+class PolicyStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+    UPCOMING = "UPCOMING"
+    POSSIBLE_DUPLICATE = "POSSIBLE_DUPLICATE"
+    POSSIBLE_REDUNDANCY = "POSSIBLE_REDUNDANCY"
+    SUPERSEDED = "SUPERSEDED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+class ConflictType(str, enum.Enum):
+    EXACT_DUPLICATE = "EXACT_DUPLICATE"
+    OVERLAPPING_SAME_TYPE = "OVERLAPPING_SAME_TYPE"
+    POTENTIAL_REDUNDANT_COVERAGE = "POTENTIAL_REDUNDANT_COVERAGE"
+    LIKELY_RENEWAL = "LIKELY_RENEWAL"
+
+
+class Severity(str, enum.Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"

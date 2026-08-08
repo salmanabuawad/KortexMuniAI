@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+*.env
+!.env.example
+/etc/muniai/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime data — never commit municipal data
+data/documents/*
+data/uploads/*
+data/processed/*
+data/thumbnails/*
+data/audio/*
+data/temp/*
+!data/**/.gitkeep
+
+# Models (downloaded, large)
+models/*
+!models/.gitkeep
+
+# Logs & backups
+logs/*
+backups/*
+!logs/.gitkeep
+!backups/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

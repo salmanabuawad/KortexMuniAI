@@ -1,0 +1,30 @@
+[Unit]
+Description=MuniAI API (FastAPI/Gunicorn)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=muniai
+Group=muniai
+WorkingDirectory=/opt/muniai/backend
+EnvironmentFile=/etc/muniai/muniai.env
+ExecStart=/opt/muniai/venv/bin/gunicorn app.main:app \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --workers 3 \
+    --bind 127.0.0.1:8000 \
+    --timeout 180 \
+    --access-logfile /opt/muniai/logs/api-access.log \
+    --error-logfile /opt/muniai/logs/api-error.log
+Restart=on-failure
+RestartSec=5
+
+# Hardening — the app must never run as root (spec §3, §46).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/muniai/data /opt/muniai/logs /opt/muniai/backups
+
+[Install]
+WantedBy=multi-user.target

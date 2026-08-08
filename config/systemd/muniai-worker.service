@@ -1,0 +1,25 @@
+[Unit]
+Description=MuniAI background worker (Celery)
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
+
+[Service]
+Type=simple
+User=muniai
+Group=muniai
+WorkingDirectory=/opt/muniai/backend
+EnvironmentFile=/etc/muniai/muniai.env
+# NOTE: the Celery app (app.jobs.worker:celery_app) is implemented in a later
+# session alongside the document/OCR pipeline. This unit is ready for it.
+ExecStart=/opt/muniai/venv/bin/celery -A app.jobs.worker:celery_app worker \
+    --loglevel=INFO --concurrency=2
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/muniai/data /opt/muniai/logs
+
+[Install]
+WantedBy=multi-user.target
