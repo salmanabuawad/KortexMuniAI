@@ -31,6 +31,9 @@ export const he: Translation = {
     sources: "מקורות",
     thinking: "חושב…",
     unavailable: "שירות הבינה המקומית אינו זמין. ודא ש-Ollama פועל.",
+    attach: "צירוף קבצים",
+    dropHere: "גרור קבצים כדי להוסיף אותם למאגר הידע",
+    generalAssistant: "עוזר כללי",
   },
   documents: {
     title: "מסמכים",

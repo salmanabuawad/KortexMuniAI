@@ -16,10 +16,13 @@ import {
 import SendIcon from "@mui/icons-material/Send";
 import AddIcon from "@mui/icons-material/Add";
 import PublicIcon from "@mui/icons-material/Public";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
+import CloseIcon from "@mui/icons-material/Close";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, streamChat } from "../api/client";
-import type { Conversation, Message } from "../types";
+import { MenuItem, Select } from "@mui/material";
+import { api, streamChat, uploadDocument } from "../api/client";
+import type { Agent, Conversation, Message } from "../types";
 import { EscalationDialog } from "../components/EscalationDialog";
 import { useAuth } from "../auth/AuthContext";
 
@@ -32,9 +35,19 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [escalationOpen, setEscalationOpen] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const canEscalate = user?.permissions.some((p) => p === "*" || p.startsWith("GLOBAL_AI_ESCALATION"));
+
+  const [agentId, setAgentId] = useState<string>("");
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api<Agent[]>("/agents"),
+  });
 
   const { data: conversations = [] } = useQuery({
     queryKey: ["conversations"],
@@ -61,13 +74,33 @@ export function ChatPage() {
     return convo.id;
   };
 
+  const addFiles = (files: FileList | null) => {
+    if (files && files.length) setAttachments((a) => [...a, ...Array.from(files)]);
+  };
+
   const send = async () => {
     const content = input.trim();
-    if (!content || streaming) return;
-    setInput("");
+    if ((!content && attachments.length === 0) || streaming || uploading) return;
 
     let id = activeId;
     if (!id) id = await newConversation();
+
+    // Upload + index any attachments first so RAG can retrieve from them in this
+    // same query (ingestion is synchronous server-side).
+    if (attachments.length) {
+      setUploading(true);
+      try {
+        for (const f of attachments) await uploadDocument(f);
+        await qc.invalidateQueries({ queryKey: ["documents"] });
+      } catch {
+        /* surfaced below as an assistant error if the query then fails */
+      }
+      setUploading(false);
+      setAttachments([]);
+    }
+    if (!content) return; // attachment-only: files are now in the knowledge base
+
+    setInput("");
 
     const userMsg: Message = {
       id: `local-${Date.now()}`,
@@ -87,7 +120,7 @@ export function ChatPage() {
     let acc = "";
     let failed = false;
     try {
-      await streamChat(id, content, null, (event) => {
+      await streamChat(id, content, agentId || null, (event) => {
         if (event.type === "delta") {
           acc += String(event.content ?? "");
           setStreamText(acc);
@@ -150,7 +183,38 @@ export function ChatPage() {
       </Paper>
 
       {/* Messages + composer */}
-      <Box sx={{ flexGrow: 1, display: "flex", flexDirection: "column" }}>
+      <Box
+        sx={{ flexGrow: 1, display: "flex", flexDirection: "column", position: "relative" }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
+      >
+        {dragOver && (
+          <Box sx={{
+            position: "absolute", inset: 0, zIndex: 5, display: "flex",
+            alignItems: "center", justifyContent: "center",
+            bgcolor: "action.hover", border: 2, borderStyle: "dashed",
+            borderColor: "primary.main", pointerEvents: "none",
+          }}>
+            <Typography variant="h6" color="primary">{t("chat.dropHere")}</Typography>
+          </Box>
+        )}
+        <Box sx={{ px: 3, pt: 2, display: "flex", justifyContent: "flex-end" }}>
+          <Select
+            size="small"
+            displayEmpty
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            sx={{ minWidth: 220 }}
+          >
+            <MenuItem value="">{t("chat.generalAssistant")}</MenuItem>
+            {agents.map((a) => (
+              <MenuItem key={a.id} value={a.id}>
+                {a.icon ? `${a.icon} ` : ""}{a.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </Box>
         <Box sx={{ flexGrow: 1, overflow: "auto", p: 3 }}>
           {messages.length === 0 && !streaming && (
             <Typography color="text.secondary" sx={{ mt: 4, textAlign: "center" }}>
@@ -177,7 +241,37 @@ export function ChatPage() {
 
         <Divider />
         <Box sx={{ p: 2 }}>
-          <Stack direction="row" spacing={1} sx={{ maxWidth: 820, mx: "auto" }}>
+          {attachments.length > 0 && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap
+              sx={{ maxWidth: 820, mx: "auto", mb: 1 }}>
+              {attachments.map((f, i) => (
+                <Chip
+                  key={`${f.name}-${i}`}
+                  label={f.name}
+                  size="small"
+                  onDelete={() => setAttachments((a) => a.filter((_, idx) => idx !== i))}
+                  deleteIcon={<CloseIcon />}
+                  disabled={uploading}
+                />
+              ))}
+            </Stack>
+          )}
+          <Stack direction="row" spacing={1} sx={{ maxWidth: 820, mx: "auto" }} alignItems="flex-end">
+            <input
+              ref={fileRef}
+              type="file"
+              hidden
+              multiple
+              onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+              accept=".pdf,.txt,.docx,.csv,.md"
+            />
+            <IconButton
+              title={t("chat.attach")}
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || streaming}
+            >
+              {uploading ? <CircularProgress size={20} /> : <AttachFileIcon />}
+            </IconButton>
             <TextField
               fullWidth
               multiline
@@ -201,7 +295,7 @@ export function ChatPage() {
                 <PublicIcon />
               </IconButton>
             )}
-            <IconButton color="primary" onClick={() => void send()} disabled={streaming}>
+            <IconButton color="primary" onClick={() => void send()} disabled={streaming || uploading}>
               <SendIcon />
             </IconButton>
           </Stack>

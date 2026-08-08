@@ -29,6 +29,9 @@ export const en = {
     sources: "Sources",
     thinking: "Thinking…",
     unavailable: "The local AI service is unavailable. Check that Ollama is running.",
+    attach: "Attach files",
+    dropHere: "Drop files to add them to the knowledge base",
+    generalAssistant: "General assistant",
   },
   documents: {
     title: "Documents",

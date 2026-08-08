@@ -31,6 +31,9 @@ export const ar: Translation = {
     sources: "المصادر",
     thinking: "يفكر…",
     unavailable: "خدمة الذكاء الاصطناعي المحلي غير متاحة. تأكد من تشغيل Ollama.",
+    attach: "إرفاق ملفات",
+    dropHere: "أفلت الملفات لإضافتها إلى قاعدة المعرفة",
+    generalAssistant: "مساعد عام",
   },
   documents: {
     title: "المستندات",
