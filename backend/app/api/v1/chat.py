@@ -150,7 +150,10 @@ async def stream_chat(
     # STRUCTURED-FIRST: known vehicle-document fields are answered deterministically
     # from stored extraction — no RAG, no LLM (spec Parts 8/10). The small local
     # model is never asked to read the value off a flattened RTL table.
-    structured = resolve_structured_answer(db, user, convo, payload.content)
+    # An explicit document pick is authoritative for both structured and RAG.
+    if payload.document_id is not None:
+        convo.active_document_id = payload.document_id
+    structured = resolve_structured_answer(db, user, convo, payload.content, payload.document_id)
 
     provider = get_provider()
     model = (agent.model if agent and agent.model else None)

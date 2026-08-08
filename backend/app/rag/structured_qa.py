@@ -244,6 +244,7 @@ import uuid  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
+from app.models.documents import Document  # noqa: E402
 from app.models.vehicles import VehicleDocument  # noqa: E402
 
 # Answer directly at/above this confidence; between MIN and this -> hedge; below
@@ -265,14 +266,30 @@ class StructuredAnswer:
     debug: dict = dc_field(default_factory=dict)
 
 
-def _target_document(db: Session, user, conversation) -> VehicleDocument | None:
-    """Which vehicle document is the user talking about (Part 7 context)."""
-    active_id = getattr(conversation, "active_document_id", None)
-    if active_id:
-        vd = db.get(VehicleDocument, active_id)
+def _vehicle_doc_for(db: Session, document_id) -> VehicleDocument | None:
+    """Resolve the vehicle document for an explicit picker id, which may be a
+    vehicle_documents id OR a documents id (same file, different store) — bridge by
+    content hash so the user's chosen file is honored."""
+    if not document_id:
+        return None
+    vd = db.get(VehicleDocument, document_id)
+    if vd and vd.extraction_json:
+        return vd
+    doc = db.get(Document, document_id)
+    if doc and doc.content_hash:
+        vd = db.scalar(
+            select(VehicleDocument).where(VehicleDocument.content_hash == doc.content_hash)
+        )
         if vd and vd.extraction_json:
             return vd
-    # Most recent vehicle document uploaded by this user, else most recent overall.
+    return None
+
+
+def _target_document(db: Session, user, document_id=None) -> VehicleDocument | None:
+    """Pick the vehicle document to answer from. An explicit user pick wins;
+    otherwise use the MOST RECENT vehicle document (never a stale pinned one)."""
+    if document_id:
+        return _vehicle_doc_for(db, document_id)
     for stmt in (
         select(VehicleDocument).where(VehicleDocument.uploaded_by == user.id)
         .order_by(VehicleDocument.created_at.desc()),
@@ -284,7 +301,8 @@ def _target_document(db: Session, user, conversation) -> VehicleDocument | None:
     return None
 
 
-def resolve_structured_answer(db: Session, user, conversation, question: str) -> StructuredAnswer | None:
+def resolve_structured_answer(db: Session, user, conversation, question: str,
+                              document_id=None) -> StructuredAnswer | None:
     """Deterministic structured answer for the chat endpoint, or None to defer to RAG."""
     intent = detect_structured_intent(question)
     debug = {"question": question, "detected_intent": intent.field,
@@ -292,7 +310,7 @@ def resolve_structured_answer(db: Session, user, conversation, question: str) ->
     if not intent.field or intent.confidence < 0.8:
         return None
 
-    vd = _target_document(db, user, conversation)
+    vd = _target_document(db, user, document_id)
     if not vd:
         return None
 

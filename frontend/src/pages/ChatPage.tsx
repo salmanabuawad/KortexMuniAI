@@ -73,6 +73,12 @@ export function ChatPage() {
     }
   }, []);
 
+  // Default the document context to the most recently uploaded document, so a new
+  // upload is used by default instead of the first/old file.
+  useEffect(() => {
+    if (!docId && documents.length) setDocId(documents[0].id);
+  }, [documents, docId]);
+
   const loadMessages = async (id: string) => {
     setActiveId(id);
     setMessages(await api<Message[]>(`/chat/conversations/${id}/messages`));
@@ -105,8 +111,13 @@ export function ChatPage() {
     if (attachments.length) {
       setUploading(true);
       try {
-        for (const f of attachments) await uploadDocument(f);
+        let lastId = "";
+        for (const f of attachments) {
+          const up = (await uploadDocument(f)) as { id?: string };
+          if (up?.id) lastId = up.id;
+        }
         await qc.invalidateQueries({ queryKey: ["documents"] });
+        if (lastId) setDocId(lastId); // focus the just-uploaded document
       } catch {
         /* surfaced below as an assistant error if the query then fails */
       }
