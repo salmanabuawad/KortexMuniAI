@@ -34,6 +34,7 @@ from app.models.chat import Conversation, Message
 from app.models.chat import MessageSource
 from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
+from app.rag.postprocess import clean_answer
 from app.rag.retrieval import retrieve
 from app.rag.service import RAG_SYSTEM, build_context_block
 from app.rag.structured_qa import resolve_structured_answer
@@ -157,16 +158,20 @@ async def stream_chat(
 
     citations = []
     history: list[ChatMessage] = []
+    debug = structured.debug if structured else {}
     if structured is None:
         # Permission-aware retrieval — restricted content is filtered in SQL before
         # anything reaches the model.
         retrieved = await retrieve(db, user, payload.content)
-        context_block, citations = build_context_block(retrieved)
+        context_block, citations = build_context_block(retrieved, payload.content)
         history = _build_history(convo, agent, context_block)
-
-    debug = structured.debug if structured else {
-        "question": payload.content, "detected_intent": None,
-        "lookup_mode": "rag", "llm_called": True}
+        debug = {
+            "question": payload.content, "detected_intent": None,
+            "lookup_mode": "rag", "llm_called": bool(context_block) or True,
+            "retrieved_chunk_count": len(retrieved),
+            "context_chunks_used": len(citations),
+            "context_char_count": len(context_block),
+        }
 
     audit.record(
         db, action="ai_query", user_id=user.id, resource_type="conversation",
@@ -182,11 +187,17 @@ async def stream_chat(
                 collected.append(structured.content)
                 yield _sse({"type": "delta", "content": structured.content})
             else:
+                # Accumulate the full RAG answer, then post-process (dedupe repeats,
+                # strip [n] markers) BEFORE showing it — a small model otherwise
+                # loops and echoes the duplicated context.
+                raw: list[str] = []
                 async for delta in provider.stream(
                     history, model=model, temperature=temperature
                 ):
-                    collected.append(delta)
-                    yield _sse({"type": "delta", "content": delta})
+                    raw.append(delta)
+                cleaned = clean_answer("".join(raw))
+                collected.append(cleaned)
+                yield _sse({"type": "delta", "content": cleaned})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Streaming failed: %s", exc)
             yield _sse({"type": "error", "message": "The local AI service is unavailable."})
@@ -231,6 +242,9 @@ async def stream_chat(
             convo.title = payload.content.strip()[:60] or "New conversation"
         db.commit()
         db.refresh(assistant)
+        debug_out = {**debug, "answer_char_count": len(content),
+                     "sources_used": len(sources_out),
+                     "llm_model": (None if structured else (model or getattr(provider, "chat_model", None)))}
         yield _sse({
             "type": "done",
             "message_id": str(assistant.id),
@@ -238,7 +252,7 @@ async def stream_chat(
             "provider": assistant.provider,
             "model": assistant.model,
             "sources": sources_out,
-            "debug": debug,
+            "debug": debug_out,
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

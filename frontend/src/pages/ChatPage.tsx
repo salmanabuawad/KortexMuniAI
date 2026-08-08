@@ -325,6 +325,16 @@ export function ChatPage() {
   );
 }
 
+function dedupeSources(sources: Message["sources"]): Message["sources"] {
+  const seen = new Set<string>();
+  return sources.filter((s) => {
+    const key = `${s.document_id ?? ""}|${s.page ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function lastUserQuestion(messages: Message[]): string {
   const users = messages.filter((m) => m.role === "user");
   return users.length ? users[users.length - 1].content : "";
@@ -382,12 +392,12 @@ function MessageBubble({ message }: { message: Message }) {
                 {t("chat.sources")}:
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                {message.sources.map((s) => (
+                {dedupeSources(message.sources).map((s, i) => (
                   <Chip
-                    key={`${s.document_id}-${s.rank}`}
+                    key={`${s.document_id ?? "d"}-${s.page ?? 0}-${i}`}
                     size="small"
                     variant="outlined"
-                    label={`[${s.rank}] ${s.document_title ?? ""}${s.page ? ` · p.${s.page}` : ""}`}
+                    label={`${s.document_title ?? ""}${s.page ? ` · p.${s.page}` : ""}`}
                   />
                 ))}
               </Stack>

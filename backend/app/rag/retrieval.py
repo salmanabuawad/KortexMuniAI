@@ -81,7 +81,7 @@ def _semantic_search(
 
 
 async def retrieve(
-    db: Session, user: User, query: str, *, top_k: int = 6
+    db: Session, user: User, query: str, *, top_k: int = 8
 ) -> list[RetrievedChunk]:
     """Return the top-K permission-filtered chunks for a query."""
     # Cheap short-circuit: if the user can see no documents, skip entirely.

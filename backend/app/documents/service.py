@@ -106,11 +106,26 @@ async def ingest_document(
 
 
 def _persist_chunks(db: Session, doc: Document, chunks) -> None:
+    # Skip duplicate chunks (identical normalized text) so retrieval never returns
+    # the same paragraph several times (spec §11). Keeps positions stable.
+    import hashlib
+    import re
+
+    seen: set[str] = set()
+    pos = 0
     for ch in chunks:
+        norm = re.sub(r"\s+", " ", ch.content or "").strip().lower()
+        if not norm:
+            continue
+        h = hashlib.sha256(norm.encode("utf-8")).hexdigest()
+        if h in seen:
+            continue
+        seen.add(h)
         db.add(DocumentChunk(
-            document_id=doc.id, position=ch.position, page=ch.page,
+            document_id=doc.id, position=pos, page=ch.page,
             content=ch.content, token_count=len(ch.content.split()),
         ))
+        pos += 1
     db.commit()
 
 

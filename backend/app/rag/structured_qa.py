@@ -230,8 +230,9 @@ def _display_value(field: str, value: str) -> str:
 
 
 def format_field_answer(field: str, value: str, lang: str) -> str:
+    # No inline source marker — the frontend renders the single source separately.
     label = _LABELS.get(lang, _LABELS["en"]).get(field, field)
-    return f"{label} **{_display_value(field, value)}** [1]"
+    return f"{label} **{_display_value(field, value)}**"
 
 
 # --------------------------------------------------------------------------- #
