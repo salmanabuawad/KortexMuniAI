@@ -273,7 +273,7 @@ export function ChatPage() {
               hidden
               multiple
               onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
-              accept=".pdf,.txt,.docx,.csv,.md"
+              accept=".pdf,.txt,.docx,.csv,.md,.png,.jpg,.jpeg,.webp,.tif,.tiff,.heic,.bmp,image/*"
             />
             <IconButton
               title={t("chat.attach")}

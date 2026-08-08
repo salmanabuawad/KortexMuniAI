@@ -28,6 +28,19 @@ class OcrPage:
     text: str
 
 
+def _register_heif() -> None:
+    """Enable HEIC/HEIF (iPhone photos) in Pillow if pillow-heif is installed."""
+    try:
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+    except Exception:  # noqa: BLE001 — optional
+        pass
+
+
+_register_heif()
+
+
 def _tesseract_available() -> bool:
     try:
         import pytesseract  # noqa: F401

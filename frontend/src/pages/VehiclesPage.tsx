@@ -76,7 +76,7 @@ export function VehiclesPage() {
           {t("vehicles.upload")}
         </Button>
         <input ref={fileRef} type="file" hidden onChange={onPick}
-          accept=".pdf,.txt,.png,.jpg,.jpeg" />
+          accept=".pdf,.txt,.png,.jpg,.jpeg,.webp,.tif,.tiff,.heic,.bmp,image/*" />
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

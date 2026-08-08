@@ -74,7 +74,7 @@ export function DocumentsPage() {
           type="file"
           hidden
           onChange={onPick}
-          accept=".pdf,.txt,.docx,.csv,.md,.png,.jpg,.jpeg"
+          accept=".pdf,.txt,.docx,.csv,.md,.png,.jpg,.jpeg,.webp,.tif,.tiff,.heic,.bmp,image/*"
         />
       </Stack>
 
