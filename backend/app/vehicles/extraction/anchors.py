@@ -34,8 +34,11 @@ ANCHORS: dict[str, list[str]] = {
         "מס' פוליסה", "מספר פוליסה", "פוליסה מספר", "פוליסה מס'", "מס פוליסה",
     ],
     "policy_holder": [
-        "בעל הפוליסה", "שם בעל הפוליסה", "שם המבוטח", "המבוטח", "בעל הרכב",
+        "שם בעל הפוליסה", "בעל הפוליסה", "שם המבוטח", "המבוטח", "בעל הרכב",
     ],
+    # Address is matched as its own field (exact phrase wins over the "בעל
+    # הפוליסה" substring) so it never pollutes policy_holder. Not extracted.
+    "address": ["כתובת בעל הפוליסה", "כתובת המבוטח", "כתובת"],
     "agent_number": ["מס' סוכן", "מספר סוכן", "סוכן"],
     "chassis": ["מספר שלדה", "מס' שלדה", "שלדה"],
     "manufacturer": ["תוצר", "יצרן"],

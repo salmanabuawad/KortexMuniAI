@@ -6,6 +6,7 @@ from app.vehicles.extraction.extractors.base import (
     add_simple_fields,
     add_vehicle_number,
     detect_insurer,
+    detect_policy_number,
 )
 from app.vehicles.extraction.layout import LabelHit
 from app.vehicles.extraction.schemas import ExtractionResult, Word
@@ -23,3 +24,10 @@ def extract(result: ExtractionResult, words: list[Word], labels: list[LabelHit],
     ins = detect_insurer(text)
     if ins and "insurer" not in result.fields:
         result.fields["insurer"] = ins
+
+    # The dashed policy-number pattern is unambiguous — prefer it over a weak or
+    # missing layout guess.
+    pol = detect_policy_number(text)
+    if pol and (result.fields.get("policy_number") is None
+                or (result.fields["policy_number"].confidence or 0) < pol.confidence):
+        result.fields["policy_number"] = pol

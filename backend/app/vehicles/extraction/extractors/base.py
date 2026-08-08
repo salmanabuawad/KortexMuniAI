@@ -6,6 +6,7 @@ from datetime import date
 
 from dateutil import parser as dateparser
 
+from app.vehicles.extraction.anchors import best_field_for_phrase
 from app.vehicles.extraction.candidate_scoring import (
     confidence_from_score,
     score_vehicle_candidates,
@@ -62,25 +63,32 @@ def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
             break
 
     value_tokens: list[Word] = []
-    if label_row:
-        # Value side in RTL is to the left of the label; take tokens not overlapping label.
+
+    # Prefer the row directly below, column-aligned (label-over-value forms — the
+    # common Israeli certificate layout). This avoids grabbing a neighbouring
+    # label that shares the same label row.
+    below_rows = [r for r in rows if r and min(w.cy for w in r) > label.y1 - label.h * 0.3]
+    below_rows.sort(key=lambda r: min(w.cy for w in r))
+    for r in below_rows:
+        col = [w for w in r if w.text.strip()
+               and w.x1 >= label.x0 - label.h and w.x0 <= label.x1 + label.h
+               and any(ch.isalpha() for ch in w.text)
+               and best_field_for_phrase(w.text)[0] is None]  # skip other labels
+        if col:
+            value_tokens = col
+            break
+
+    # Otherwise the value is beside the label (inline "label: value" — RTL puts
+    # the value to the left). Exclude tokens that are themselves labels.
+    if not value_tokens and label_row:
         value_tokens = [w for w in label_row
                         if w.x1 <= label.x0 + 1 and w.text.strip()
-                        and not _is_label_token(w, label)]
+                        and not _is_label_token(w, label)
+                        and best_field_for_phrase(w.text)[0] is None]
         if not value_tokens:
             value_tokens = [w for w in label_row
-                            if w.x0 >= label.x1 - 1 and w.text.strip()]
-
-    # Otherwise the value is on the row directly below the label (column-aligned).
-    if not value_tokens:
-        below_rows = [r for r in rows if r and min(w.cy for w in r) > label.y1 - label.h * 0.3]
-        below_rows.sort(key=lambda r: min(w.cy for w in r))
-        for r in below_rows:
-            col = [w for w in r if w.text.strip()
-                   and w.x1 >= label.x0 - label.h and w.x0 <= label.x1 + label.h]
-            if col:
-                value_tokens = col
-                break
+                            if w.x0 >= label.x1 - 1 and w.text.strip()
+                            and best_field_for_phrase(w.text)[0] is None]
 
     if not value_tokens:
         w, score, _ = resolve_value(label, words)
@@ -88,7 +96,8 @@ def resolve_text_field(label: LabelHit, words: list[Word]) -> Field | None:
             return None
         value_tokens = [w]
 
-    value_tokens.sort(key=lambda w: w.x0)
+    # Hebrew values read right-to-left, so order tokens by descending x.
+    value_tokens.sort(key=lambda w: -w.x0)
     text = " ".join(w.text for w in value_tokens).strip(" :־-")
     # Reject punctuation-only / too-short fragments (common in messy RTL PDFs).
     if len(text) < 2 or not any(ch.isalpha() for ch in text):
@@ -176,4 +185,18 @@ def detect_insurer(text: str) -> Field | None:
     for name in INSURERS:
         if name in text:
             return Field(value=name, confidence=0.7, source="regex", reason="insurer name match")
+    return None
+
+
+import re  # noqa: E402
+
+# Israeli policy numbers commonly look like 201-502525667826-00 (grouped, dashed).
+_POLICY_RE = re.compile(r"\b\d{3}-\d{6,}-\d{2}\b")
+
+
+def detect_policy_number(text: str) -> Field | None:
+    m = _POLICY_RE.search(text or "")
+    if m:
+        return Field(value=m.group(0), confidence=0.85, source="regex",
+                     reason="matched policy-number pattern")
     return None

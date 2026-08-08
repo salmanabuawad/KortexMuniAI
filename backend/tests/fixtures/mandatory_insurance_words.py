@@ -48,9 +48,10 @@ def build_words() -> dict[int, list[Word]]:
     words += [_w("פוליסה", 600, 140, 40), _w("מס'", 642, 140, 20)]
     words += [_w("201-502525667826-00", 595, 160, 70)]
 
-    # --- Policy holder (name to the LEFT of the label, same row) ---
+    # --- Policy holder (name to the LEFT of the label, same row; RTL: אבו is
+    # rightmost so it reads אבו עואד נדא) ---
     words += [
-        _w("אבו", 560, 220, 38), _w("עואד", 600, 220, 38), _w("נדא", 640, 220, 30),
+        _w("נדא", 560, 220, 30), _w("עואד", 600, 220, 38), _w("אבו", 640, 220, 38),
         _w("הפוליסה", 700, 220, 40), _w("בעל", 742, 220, 20),
     ]
 
