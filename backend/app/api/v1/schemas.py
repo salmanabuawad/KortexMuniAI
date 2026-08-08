@@ -5,7 +5,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict
+
+# NOTE: email fields are plain ``str`` (not EmailStr) on purpose: MuniAI must
+# support fully offline deployments where local ``*.local`` admin addresses are
+# valid, but email-validator rejects such reserved-use domains.
 
 
 class ORMModel(BaseModel):
@@ -14,7 +18,7 @@ class ORMModel(BaseModel):
 
 # --- auth ---
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -31,7 +35,7 @@ class DepartmentOut(ORMModel):
 
 class UserOut(ORMModel):
     id: uuid.UUID
-    email: EmailStr
+    email: str
     full_name: str
     is_superuser: bool
     locale: str
