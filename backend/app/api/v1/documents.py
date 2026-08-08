@@ -72,7 +72,7 @@ async def upload_document(
     audit.record(
         db, action="document_uploaded", user_id=user.id, resource_type="document",
         resource_id=doc.id, ip_address=client_ip(request),
-        detail=f"{doc.original_filename} ({doc.processing_status.value})",
+        detail=f"{doc.original_filename} ({getattr(doc.processing_status, 'value', doc.processing_status)})",
     )
     return doc
 
