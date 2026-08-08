@@ -50,3 +50,6 @@ Thumbs.db
 
 # debug dumps
 backend/rows_dump.txt
+
+# TS build cache
+*.tsbuildinfo
