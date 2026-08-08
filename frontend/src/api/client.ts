@@ -40,6 +40,32 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return (await resp.json()) as T;
 }
 
+export async function uploadDocument(
+  file: File,
+  classification = "INTERNAL",
+): Promise<unknown> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("classification", classification);
+  const token = getToken();
+  const resp = await fetch(`${BASE}/documents`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form, // no Content-Type: browser sets the multipart boundary
+  });
+  if (!resp.ok) {
+    let message = `Upload failed (${resp.status})`;
+    try {
+      const body = (await resp.json()) as { error?: { message?: string } };
+      message = body.error?.message ?? message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return resp.json();
+}
+
 /**
  * Open an SSE stream for chat. Uses fetch (not EventSource) so we can send the
  * Authorization header and a POST body. Calls onEvent for each parsed data line.

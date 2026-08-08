@@ -53,6 +53,19 @@ export interface Message {
   sources: MessageSource[];
 }
 
+export interface DocumentMeta {
+  id: string;
+  title: string;
+  original_filename: string;
+  file_type: string | null;
+  classification: string;
+  language: string | null;
+  page_count: number | null;
+  processing_status: string;
+  indexing_status: string | null;
+  created_at: string;
+}
+
 export interface Branding {
   org_name: string;
   accent_color: string;

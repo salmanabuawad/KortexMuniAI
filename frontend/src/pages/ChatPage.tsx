@@ -204,14 +204,33 @@ function MessageBubble({ message }: { message: Message }) {
         {message.content}
       </Typography>
       {message.role === "assistant" && (
-        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-          <Chip
-            size="small"
-            color={message.origin === "LOCAL" ? "success" : "warning"}
-            variant="outlined"
-            label={message.origin === "LOCAL" ? t("chat.localBadge") : t("chat.externalBadge")}
-          />
-          {message.model && <Chip size="small" variant="outlined" label={message.model} />}
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip
+              size="small"
+              color={message.origin === "LOCAL" ? "success" : "warning"}
+              variant="outlined"
+              label={message.origin === "LOCAL" ? t("chat.localBadge") : t("chat.externalBadge")}
+            />
+            {message.model && <Chip size="small" variant="outlined" label={message.model} />}
+          </Stack>
+          {message.sources.length > 0 && (
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                {t("chat.sources")}:
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {message.sources.map((s) => (
+                  <Chip
+                    key={`${s.document_id}-${s.rank}`}
+                    size="small"
+                    variant="outlined"
+                    label={`[${s.rank}] ${s.document_title ?? ""}${s.page ? ` · p.${s.page}` : ""}`}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
         </Stack>
       )}
     </Bubble>

@@ -4,6 +4,7 @@ import { useAuth } from "./auth/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { AppLayout } from "./layouts/AppLayout";
 import { ChatPage } from "./pages/ChatPage";
+import { DocumentsPage } from "./pages/DocumentsPage";
 import { ComingLaterPage } from "./pages/ComingLaterPage";
 
 export function App() {
@@ -33,7 +34,7 @@ export function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/search" element={<ComingLaterPage titleKey="nav.search" />} />
         <Route path="/knowledge" element={<ComingLaterPage titleKey="nav.knowledge" />} />
-        <Route path="/documents" element={<ComingLaterPage titleKey="nav.documents" />} />
+        <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/agents" element={<ComingLaterPage titleKey="nav.agents" />} />
         <Route path="/vehicles" element={<ComingLaterPage titleKey="nav.vehicles" />} />
         <Route path="/admin" element={<ComingLaterPage titleKey="nav.admin" />} />
