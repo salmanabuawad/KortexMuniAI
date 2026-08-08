@@ -47,3 +47,6 @@ backend/sss_dump.json
 Thumbs.db
 .idea/
 .vscode/
+
+# debug dumps
+backend/rows_dump.txt
