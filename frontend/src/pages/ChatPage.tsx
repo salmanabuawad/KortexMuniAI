@@ -23,6 +23,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MenuItem, Select } from "@mui/material";
 import { api, streamChat, uploadDocument } from "../api/client";
 import type { Agent, Conversation, Message } from "../types";
+import ReactMarkdown from "react-markdown";
 import { EscalationDialog } from "../components/EscalationDialog";
 import { useAuth } from "../auth/AuthContext";
 
@@ -57,6 +58,15 @@ export function ChatPage() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamText]);
+
+  // Pick up a question handed over from the Dashboard "Ask MuniAI" box.
+  useEffect(() => {
+    const pending = sessionStorage.getItem("muniai.pendingQuestion");
+    if (pending) {
+      setInput(pending);
+      sessionStorage.removeItem("muniai.pendingQuestion");
+    }
+  }, []);
 
   const loadMessages = async (id: string) => {
     setActiveId(id);
@@ -152,7 +162,7 @@ export function ChatPage() {
   };
 
   return (
-    <Box sx={{ display: "flex", height: "calc(100vh - 64px)" }}>
+    <Box sx={{ display: "flex", height: "100%" }}>
       {/* Conversation list */}
       <Paper
         square
@@ -322,11 +332,27 @@ function lastUserQuestion(messages: Message[]): string {
 
 function MessageBubble({ message }: { message: Message }) {
   const { t } = useTranslation();
+  const isUser = message.role === "user";
   return (
     <Bubble role={message.role}>
-      <Typography variant="body1" sx={{ whiteSpace: "pre-wrap" }}>
-        {message.content}
-      </Typography>
+      {isUser ? (
+        <Typography variant="body1" sx={{ whiteSpace: "pre-wrap" }}>
+          {message.content}
+        </Typography>
+      ) : (
+        <Box
+          sx={{
+            "& p": { m: 0, mb: 1 }, "& p:last-child": { mb: 0 },
+            "& ul, & ol": { m: 0, mb: 1, pl: 3 },
+            "& code": { bgcolor: "action.hover", px: 0.5, borderRadius: 0.5, fontSize: 13 },
+            "& pre": { bgcolor: "action.hover", p: 1, borderRadius: 1, overflow: "auto" },
+            "& table": { borderCollapse: "collapse", width: "100%" },
+            "& th, & td": { border: 1, borderColor: "divider", px: 1, py: 0.5 },
+          }}
+        >
+          <ReactMarkdown>{message.content}</ReactMarkdown>
+        </Box>
+      )}
       {message.role === "assistant" && (
         <Stack spacing={1} sx={{ mt: 1 }}>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>

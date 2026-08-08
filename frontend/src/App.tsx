@@ -4,6 +4,7 @@ import { useAuth } from "./auth/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { AppLayout } from "./layouts/AppLayout";
 import { ChatPage } from "./pages/ChatPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { VehiclesPage } from "./pages/VehiclesPage";
 import { AdminPage } from "./pages/AdminPage";
@@ -32,7 +33,8 @@ export function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/search" element={<ComingLaterPage titleKey="nav.search" />} />
         <Route path="/knowledge" element={<ComingLaterPage titleKey="nav.knowledge" />} />
@@ -40,9 +42,9 @@ export function App() {
         <Route path="/agents" element={<ComingLaterPage titleKey="nav.agents" />} />
         <Route path="/vehicles" element={<VehiclesPage />} />
         <Route path="/admin" element={<AdminPage />} />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
-      <Route path="/login" element={<Navigate to="/chat" replace />} />
+      <Route path="/login" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
