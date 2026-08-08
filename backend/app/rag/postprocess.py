@@ -110,11 +110,23 @@ def clean_context_text(text: str) -> str:
     return "\n".join(out_lines).strip()
 
 
+# Prompt-scaffold leakage a small model sometimes echoes instead of answering
+# (e.g. "context>.pdf>", "SOURCES:"). Strip these fragments wherever they appear.
+_SCAFFOLD = re.compile(r"(?i)\b(context|sources)\b\s*:?|\S*\.pdf[>\]]?|<[^>]*>|[<>]+")
+
+
+def has_content(text: str) -> bool:
+    """True if the text has enough real letters (he/ar/latin) to be an answer."""
+    letters = re.findall(r"[A-Za-z֐-׿؀-ۿ]", text or "")
+    return len(letters) >= 8
+
+
 def clean_answer(text: str) -> str:
-    """Post-process an LLM answer: remove inline [n] markers and repeated
-    sentences/paragraphs (small models loop), collapse whitespace. Never edits
-    factual content — only removes duplicates and metadata markers."""
-    text = _CITE.sub("", text or "")
+    """Post-process an LLM answer: strip prompt scaffolding + inline [n] markers and
+    repeated sentences/paragraphs (small models loop), collapse whitespace. Never
+    edits factual content — only removes duplicates and metadata."""
+    text = _SCAFFOLD.sub(" ", text or "")
+    text = _CITE.sub("", text)
     sentences = [s.strip() for s in _SENT_SPLIT.split(text) if s.strip()]
     kept: list[str] = []
     seen: list[str] = []

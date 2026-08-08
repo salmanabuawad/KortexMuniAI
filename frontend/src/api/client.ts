@@ -83,6 +83,7 @@ export async function streamChat(
   agentId: string | null,
   onEvent: (event: Record<string, unknown>) => void,
   signal?: AbortSignal,
+  documentId?: string | null,
 ): Promise<void> {
   const token = getToken();
   const resp = await fetch(`${BASE}/chat/conversations/${conversationId}/stream`, {
@@ -91,7 +92,7 @@ export async function streamChat(
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ content, agent_id: agentId }),
+    body: JSON.stringify({ content, agent_id: agentId, document_id: documentId ?? null }),
     signal,
   });
   if (!resp.ok || !resp.body) {

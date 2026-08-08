@@ -35,6 +35,7 @@ export const he: Translation = {
     attach: "צירוף קבצים",
     dropHere: "גרור קבצים כדי להוסיף אותם למאגר הידע",
     generalAssistant: "עוזר כללי",
+    allDocuments: "כל המסמכים",
   },
   documents: {
     title: "מסמכים",

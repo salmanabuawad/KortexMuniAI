@@ -22,7 +22,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MenuItem, Select } from "@mui/material";
 import { api, streamChat, uploadDocument } from "../api/client";
-import type { Agent, Conversation, Message } from "../types";
+import type { Agent, Conversation, DocumentMeta, Message } from "../types";
 import ReactMarkdown from "react-markdown";
 import { EscalationDialog } from "../components/EscalationDialog";
 import { useAuth } from "../auth/AuthContext";
@@ -45,9 +45,14 @@ export function ChatPage() {
   const canEscalate = user?.permissions.some((p) => p === "*" || p.startsWith("GLOBAL_AI_ESCALATION"));
 
   const [agentId, setAgentId] = useState<string>("");
+  const [docId, setDocId] = useState<string>("");
   const { data: agents = [] } = useQuery({
     queryKey: ["agents"],
     queryFn: () => api<Agent[]>("/agents"),
+  });
+  const { data: documents = [] } = useQuery({
+    queryKey: ["documents"],
+    queryFn: () => api<DocumentMeta[]>("/documents"),
   });
 
   const { data: conversations = [] } = useQuery({
@@ -137,7 +142,7 @@ export function ChatPage() {
         } else if (event.type === "error") {
           failed = true;
         }
-      });
+      }, undefined, docId || null);
     } catch {
       failed = true;
     }
@@ -209,7 +214,19 @@ export function ChatPage() {
             <Typography variant="h6" color="primary">{t("chat.dropHere")}</Typography>
           </Box>
         )}
-        <Box sx={{ px: 3, pt: 2, display: "flex", justifyContent: "flex-end" }}>
+        <Box sx={{ px: 3, pt: 2, display: "flex", justifyContent: "flex-end", gap: 1, flexWrap: "wrap" }}>
+          <Select
+            size="small"
+            displayEmpty
+            value={docId}
+            onChange={(e) => setDocId(e.target.value)}
+            sx={{ minWidth: 220 }}
+          >
+            <MenuItem value="">{t("chat.allDocuments")}</MenuItem>
+            {documents.map((d) => (
+              <MenuItem key={d.id} value={d.id}>{d.title}</MenuItem>
+            ))}
+          </Select>
           <Select
             size="small"
             displayEmpty

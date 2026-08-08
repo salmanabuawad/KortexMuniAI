@@ -33,6 +33,7 @@ export const en = {
     attach: "Attach files",
     dropHere: "Drop files to add them to the knowledge base",
     generalAssistant: "General assistant",
+    allDocuments: "All documents",
   },
   documents: {
     title: "Documents",

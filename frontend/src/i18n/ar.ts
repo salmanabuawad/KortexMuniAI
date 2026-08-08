@@ -35,6 +35,7 @@ export const ar: Translation = {
     attach: "إرفاق ملفات",
     dropHere: "أفلت الملفات لإضافتها إلى قاعدة المعرفة",
     generalAssistant: "مساعد عام",
+    allDocuments: "كل المستندات",
   },
   documents: {
     title: "المستندات",

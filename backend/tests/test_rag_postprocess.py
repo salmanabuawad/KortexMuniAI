@@ -12,6 +12,7 @@ from app.rag.postprocess import (
     clean_answer,
     clean_context_text,
     dedupe_chunks,
+    has_content,
     prepare_chunks,
     rerank,
 )
@@ -79,6 +80,14 @@ def test_build_context_block_caps_and_dedupes_sources():
     # At most MAX_CONTEXT_CHUNKS, and sources deduped by (document, page) -> one.
     assert len(citations) == 1
     assert citations[0].document_title == "sss.pdf"
+
+
+def test_scaffold_garbage_is_rejected():
+    # The exact failure from the screenshot ("context>.pdf>") must not be shown.
+    assert has_content(clean_answer("context>.pdf>")) is False
+    assert has_content(clean_answer("SOURCES: <chunk> sss.pdf>")) is False
+    # A real answer survives.
+    assert has_content(clean_answer("לפי הפוליסה נדרש רישיון נהיגה תקף.")) is True
 
 
 def test_answer_shorter_than_context():

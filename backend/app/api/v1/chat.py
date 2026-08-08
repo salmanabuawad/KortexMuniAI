@@ -34,10 +34,10 @@ from app.models.chat import Conversation, Message
 from app.models.chat import MessageSource
 from app.models.enums import AnswerOrigin, MessageRole
 from app.models.iam import User
-from app.rag.postprocess import clean_answer
+from app.rag.postprocess import clean_answer, has_content
 from app.rag.retrieval import retrieve
 from app.rag.service import RAG_SYSTEM, build_context_block
-from app.rag.structured_qa import resolve_structured_answer
+from app.rag.structured_qa import detect_language, resolve_structured_answer
 
 logger = get_logger("muniai.chat")
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -161,8 +161,8 @@ async def stream_chat(
     debug = structured.debug if structured else {}
     if structured is None:
         # Permission-aware retrieval — restricted content is filtered in SQL before
-        # anything reaches the model.
-        retrieved = await retrieve(db, user, payload.content)
+        # anything reaches the model. Scope to the user's chosen document if given.
+        retrieved = await retrieve(db, user, payload.content, document_id=payload.document_id)
         context_block, citations = build_context_block(retrieved, payload.content)
         history = _build_history(convo, agent, context_block)
         debug = {
@@ -196,6 +196,15 @@ async def stream_chat(
                 ):
                     raw.append(delta)
                 cleaned = clean_answer("".join(raw))
+                # If the small model produced garbage/scaffolding or nothing usable,
+                # don't show it — say so gracefully in the user's language.
+                if not has_content(cleaned):
+                    lang = detect_language(payload.content)
+                    cleaned = {
+                        "he": "לא הצלחתי למצוא תשובה ברורה במסמכים הזמינים. נסו לנסח מחדש או לבחור את המסמך הרלוונטי.",
+                        "ar": "لم أتمكن من العثور على إجابة واضحة في المستندات المتاحة. حاول إعادة الصياغة أو اختيار المستند المناسب.",
+                        "en": "I could not find a clear answer in the available documents. Try rephrasing or selecting the relevant document.",
+                    }[lang]
                 collected.append(cleaned)
                 yield _sse({"type": "delta", "content": cleaned})
         except Exception as exc:  # noqa: BLE001

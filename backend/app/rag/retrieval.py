@@ -42,7 +42,8 @@ async def _embed_query(text: str) -> list[float] | None:
         return None
 
 
-def _keyword_search(db: Session, user: User, query: str, limit: int) -> list[RetrievedChunk]:
+def _keyword_search(db: Session, user: User, query: str, limit: int,
+                    document_id=None) -> list[RetrievedChunk]:
     allowed = accessible_document_ids(user).subquery()
     like = f"%{query.strip()}%"
     stmt = (
@@ -52,6 +53,8 @@ def _keyword_search(db: Session, user: User, query: str, limit: int) -> list[Ret
         .where(DocumentChunk.content.ilike(like))
         .limit(limit)
     )
+    if document_id is not None:
+        stmt = stmt.where(DocumentChunk.document_id == document_id)
     rows = db.execute(stmt).all()
     return [
         RetrievedChunk(str(c.id), str(c.document_id), title, c.page, c.content, 0.5)
@@ -60,7 +63,7 @@ def _keyword_search(db: Session, user: User, query: str, limit: int) -> list[Ret
 
 
 def _semantic_search(
-    db: Session, user: User, vector: list[float], limit: int
+    db: Session, user: User, vector: list[float], limit: int, document_id=None
 ) -> list[RetrievedChunk]:
     allowed = accessible_document_ids(user).subquery()
     distance = Embedding.vector.cosine_distance(vector)
@@ -72,6 +75,8 @@ def _semantic_search(
         .order_by(distance)
         .limit(limit)
     )
+    if document_id is not None:
+        stmt = stmt.where(DocumentChunk.document_id == document_id)
     rows = db.execute(stmt).all()
     return [
         RetrievedChunk(str(c.id), str(c.document_id), title, c.page, c.content,
@@ -81,9 +86,10 @@ def _semantic_search(
 
 
 async def retrieve(
-    db: Session, user: User, query: str, *, top_k: int = 8
+    db: Session, user: User, query: str, *, top_k: int = 8, document_id=None
 ) -> list[RetrievedChunk]:
-    """Return the top-K permission-filtered chunks for a query."""
+    """Return the top-K permission-filtered chunks. When ``document_id`` is given,
+    retrieval is scoped to that single document (the user's chosen file)."""
     # Cheap short-circuit: if the user can see no documents, skip entirely.
     has_any = db.scalar(
         select(func.count()).select_from(accessible_document_ids(user).subquery())
@@ -95,10 +101,10 @@ async def retrieve(
 
     vector = await _embed_query(query)
     if vector is not None:
-        for rc in _semantic_search(db, user, vector, top_k):
+        for rc in _semantic_search(db, user, vector, top_k, document_id):
             results[rc.chunk_id] = rc
 
-    for rc in _keyword_search(db, user, query, top_k):
+    for rc in _keyword_search(db, user, query, top_k, document_id):
         # Keyword hits reinforce/attach; keep the higher score if already present.
         if rc.chunk_id in results:
             existing = results[rc.chunk_id]

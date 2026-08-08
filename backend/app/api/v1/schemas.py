@@ -106,6 +106,7 @@ class MessageOut(ORMModel):
 class ChatRequest(BaseModel):
     content: str
     agent_id: uuid.UUID | None = None
+    document_id: uuid.UUID | None = None  # scope the answer to one chosen document
 
 
 # --- vehicles ---
